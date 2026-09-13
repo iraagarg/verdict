@@ -1,0 +1,8 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+# Dependency build scripts are blocked by default. Approve only what is needed:
+# esbuild is vitest's bundler and cannot run without its postinstall step.
+allowBuilds:
+  esbuild: true

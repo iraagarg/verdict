@@ -1,0 +1,153 @@
+# Local development stack. `docker compose up` from a clean clone must work.
+#
+# Datastore images mirror the managed services used in deploy (Neon = Postgres
+# with pgvector, Upstash = Redis), so local and production differ in URL only.
+
+name: verdict
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: verdict
+      POSTGRES_PASSWORD: verdict
+      POSTGRES_DB: verdict
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U verdict -d verdict"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Schema is applied by an explicit one-shot service, NOT by Postgres's
+  # /docker-entrypoint-initdb.d hook.
+  #
+  # The init hook only fires when the data directory is empty, so a developer
+  # with a stale `verdict_pgdata` volume gets a silently empty schema and a
+  # gateway that starts fine and fails on first query. This service runs on
+  # every `up`; the migrations are idempotent (IF NOT EXISTS throughout), so
+  # running them repeatedly is a no-op. See DECISIONS.md D-016.
+  migrate:
+    image: pgvector/pgvector:pg16
+    environment:
+      PGPASSWORD: verdict
+    volumes:
+      - ./db/migrations:/migrations:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        for f in /migrations/*.sql; do
+          echo "applying $$f"
+          psql -h postgres -U verdict -d verdict -v ON_ERROR_STOP=1 -f "$$f"
+        done
+        echo "migrations complete"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  gateway:
+    build:
+      context: .
+      dockerfile: apps/gateway/Dockerfile
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
+    environment:
+      NODE_ENV: development
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      GATEWAY_PORT: "8080"
+      GATEWAY_HOST: 0.0.0.0
+      DATABASE_URL: postgres://verdict:verdict@postgres:5432/verdict
+      REDIS_URL: redis://redis:6379
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      COST_CAP_USD_PER_DAY: ${COST_CAP_USD_PER_DAY:-5.00}
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  evald:
+    build:
+      context: .
+      dockerfile: apps/evald/Dockerfile
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
+    environment:
+      NODE_ENV: development
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      EVALD_PORT: "8000"
+      EVALD_HOST: 0.0.0.0
+      DATABASE_URL: postgres://verdict:verdict@postgres:5432/verdict
+      REDIS_URL: redis://redis:6379
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      COST_CAP_USD_PER_DAY: ${COST_CAP_USD_PER_DAY:-5.00}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen(''http://localhost:8000/health'').status==200 else 1)"',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: apps/dashboard/Dockerfile
+    environment:
+      NODE_ENV: production
+    ports:
+      - "3000:3000"
+    depends_on:
+      gateway:
+        condition: service_started
+
+volumes:
+  pgdata:

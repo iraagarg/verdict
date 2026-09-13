@@ -1,0 +1,88 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Verdict model ladder and cost configuration.
+#
+# RULES (enforced by the schema in packages/shared/src/config/models.ts):
+#   1. Prices are USD per MILLION tokens. Never inline in code.
+#   2. Every `pricing` block MUST carry `verified_at` and `source`. A price with
+#      no provenance fails validation and the process refuses to start.
+#      This is non-negotiable #1 applied to numbers, not just to benchmarks.
+#   3. `null` means "not yet verified" and is NOT the same as zero. Any cost
+#      calculation that needs a null field must fail loudly, never assume 0.
+#   4. Model IDs are exact. Current Claude IDs carry NO date suffix.
+#
+# STATUS: Anthropic pricing verified 2026-09-13. Groq and OpenAI rungs are
+# deliberately absent until their official pricing pages are read in P1
+# (DESIGN.md §13 open item 1). Adding a rung with a guessed price is forbidden.
+# ─────────────────────────────────────────────────────────────────────────────
+
+version: 1
+
+# Embedding model for route clustering and the semantic cache.
+# Chosen in P2; `dimensions` is a migration-breaking constant (DECISIONS.md D-015).
+embedding:
+  model: null
+  dimensions: null
+
+# The rung a request falls back to whenever there is no positive evidence that
+# something cheaper is safe: no policy, out-of-distribution prompt, breaker open,
+# insufficient sample size. DESIGN.md §8.2 — the router fails toward quality.
+safe_default: claude-opus-5
+
+# The frozen reference outputs every pairwise judgment compares against.
+# DECISIONS.md D-003.
+reference_model: claude-opus-5
+
+models:
+  claude-haiku-4-5:
+    provider: anthropic
+    rung: cheap
+    context_window: 200000
+    max_output_tokens: 64000
+    pricing:
+      input: 1.00
+      output: 5.00
+      cache_read: null # TBD P1 — needed for the cache-aware cost model (DESIGN.md §11 threat 1)
+      cache_write: null # TBD P1
+      verified_at: "2026-09-13"
+      source: "https://www.anthropic.com/pricing"
+    capabilities:
+      supports_sampling_params: true # temperature / top_p accepted
+      supports_effort: false # output_config.effort errors on this model
+      thinking_mode: budget_tokens # {type:"enabled", budget_tokens:N}
+      supports_prefill: true
+
+  claude-sonnet-5:
+    provider: anthropic
+    rung: mid
+    context_window: 1000000
+    max_output_tokens: 128000
+    pricing:
+      input: 2.00
+      output: 10.00
+      cache_read: null # TBD P1
+      cache_write: null # TBD P1
+      verified_at: "2026-09-13"
+      source: "https://www.anthropic.com/pricing"
+    capabilities:
+      supports_sampling_params: false # temperature / top_p return HTTP 400
+      supports_effort: true
+      thinking_mode: adaptive # budget_tokens returns HTTP 400
+      supports_prefill: false
+
+  claude-opus-5:
+    provider: anthropic
+    rung: strong
+    context_window: 1000000
+    max_output_tokens: 128000
+    pricing:
+      input: 5.00
+      output: 25.00
+      cache_read: null # TBD P1
+      cache_write: null # TBD P1
+      verified_at: "2026-09-13"
+      source: "https://www.anthropic.com/pricing"
+    capabilities:
+      supports_sampling_params: false # temperature / top_p return HTTP 400
+      supports_effort: true
+      thinking_mode: adaptive # budget_tokens returns HTTP 400
+      supports_prefill: false

@@ -1,0 +1,46 @@
+[project]
+name = "evald"
+version = "0.0.0"
+description = "Verdict evaluation service: replay, judge, calibrate, test, fit."
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.32",
+  "pydantic>=2.10",
+  "pydantic-settings>=2.6",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3",
+  "httpx2>=0.29",
+  "mypy>=1.13",
+  "ruff>=0.8",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "ANN", "RUF"]
+ignore = ["ANN401"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["ANN"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
