@@ -7,24 +7,22 @@
 import Fastify, { LogController } from "fastify";
 import { randomUUID } from "node:crypto";
 import { createLogger } from "./logger.js";
+import { registerChatRoutes } from "./routes/chat.js";
+import type { GatewayApp } from "./http.js";
+import type { GatewayServices } from "./services.js";
 import type { Env } from "./env.js";
+
+export type { GatewayApp } from "./http.js";
 
 export interface BuildOptions {
   env: Env;
+  services: GatewayServices;
 }
 
 /** Reported by /health so a running container can be tied back to a commit. */
 const GIT_SHA = process.env["GIT_SHA"] ?? "unknown";
 
-/**
- * The concrete instance type. Annotating buildApp with the bare
- * `FastifyInstance` default loses the pino logger type and fails under
- * `exactOptionalPropertyTypes`, so the type is derived from the factory rather
- * than asserted onto it.
- */
-export type GatewayApp = ReturnType<typeof buildApp>;
-
-export function buildApp({ env }: BuildOptions) {
+export function buildApp({ env, services }: BuildOptions): GatewayApp {
   const app = Fastify({
     loggerInstance: createLogger(env),
     // Trust an inbound request id when a caller supplies one, so a trace can
@@ -70,10 +68,24 @@ export function buildApp({ env }: BuildOptions) {
    * Verdict serves traffic without its analytics store. Only a condition that
    * genuinely prevents serving may return 503.
    */
-  app.get("/ready", async () => ({
-    status: "ready",
-    dependencies: {} as Record<string, "ok" | "degraded">,
-  }));
+  app.get("/ready", async () => {
+    // Per DESIGN.md failure modes #7 and #8, a degraded datastore must NOT make
+    // the gateway unready: Verdict serves traffic without its analytics store.
+    // These are reported for visibility, never to gate traffic.
+    const breakers: Record<string, string> = {};
+    for (const [name, breaker] of services.registry.breakers()) breakers[name] = breaker.state;
+    return {
+      status: "ready",
+      dependencies: {
+        traces_queued: services.traces.size,
+        traces_dropped: services.traces.dropped,
+        trace_flush_failures: services.traces.flushFailures,
+        breakers,
+      },
+    };
+  });
+
+  registerChatRoutes(app, services);
 
   app.setNotFoundHandler(async (req, reply) => {
     // OpenAI-shaped error body, so a client's error parser keeps working.

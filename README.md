@@ -8,7 +8,7 @@ the cheapest model that still clears a statistical quality floor.
 > Existing tools (LangSmith, Braintrust, Promptfoo) measure LLM quality but do not close the loop
 > to automatic cost-optimal routing with a proven quality guarantee. Verdict does.
 
-**Status: Phase 0 of 8 — design and scaffold.** There are no benchmark numbers yet, and there will
+**Status: Phase 1 of 8 — the gateway is live.** There are no benchmark numbers yet, and there will
 be none in this README until `make bench` produces them into committed artifacts. A number that is
 not in `artifacts/` does not exist.
 
@@ -32,11 +32,40 @@ curl -s localhost:8080/health
 
 `make down` stops everything and drops the volume. `make help` lists every target.
 
+## Using the gateway
+
+Point any OpenAI client at it — change `baseURL` and nothing else.
+
+```bash
+curl -N http://localhost:8080/v1/chat/completions \
+  -H 'content-type: application/json' \
+  -d '{
+    "model": "claude-haiku-4-5",
+    "messages": [{"role": "user", "content": "Explain SSE in one sentence."}],
+    "stream": true,
+    "stream_options": {"include_usage": true}
+  }'
+```
+
+`model` accepts any id in [config/models.yaml](config/models.yaml), or `verdict-auto` to let Verdict
+choose (P1 resolves that to the configured `safe_default`; P5 replaces it with a fitted policy).
+
+Response headers carry what Verdict did, so the body stays a byte-for-byte OpenAI shape:
+
+| Header                     | Meaning                                                      |
+| -------------------------- | ------------------------------------------------------------ |
+| `x-verdict-request-id`     | Propagated to every log line and the trace row               |
+| `x-verdict-model-served`   | The rung that actually served the request                    |
+| `x-verdict-provider`       | `anthropic` / `openai` / `groq`                              |
+| `x-verdict-cost-usd`       | Exact cost, 8dp (non-streaming)                              |
+| `x-verdict-usage-final`    | Whether the provider confirmed its token counts              |
+| `x-verdict-dropped-params` | Parameters the served model rejects (see DECISIONS.md D-010) |
+
 ## Development
 
 ```bash
 make install      # pnpm workspace + evald virtualenv (Python 3.12)
-make test         # 26 TypeScript tests, 25 Python tests
+make test         # 156 TypeScript tests, 25 Python tests
 make lint         # eslint, prettier, ruff
 make typecheck    # tsc --strict, mypy --strict
 ```
@@ -60,8 +89,8 @@ artifacts/       Committed benchmark output. The only source of any number.
 | Phase | Scope                                                          | Status |
 | ----- | -------------------------------------------------------------- | ------ |
 | P0    | Design, decisions, scaffold, CI, docker compose                | done   |
-| P1    | Gateway: streaming proxy, adapters, traces, cost accounting    | next   |
-| P2    | Benchmark corpus + deterministic replay runner                 |        |
+| P1    | Gateway: streaming proxy, adapters, traces, cost accounting    | done   |
+| P2    | Benchmark corpus + deterministic replay runner                 | next   |
 | P3    | LLM-as-judge + calibration against human labels (Cohen's κ)    |        |
 | P4    | Paired bootstrap CIs, McNemar, regression-vs-noise verdicts    |        |
 | P5    | Cascade router, threshold fitting, Pareto curve                |        |

@@ -530,44 +530,53 @@ normalises; nothing above the adapter knows these differences exist.
 
 ## 7. Model ladder and cost configuration
 
-### 7.1 Verified Anthropic pricing
+### 7.1 Verified pricing
 
-First-party API rates, USD per million tokens, as documented at the time of writing:
+USD per million tokens, fetched from official pricing pages on 2026-09-14. Anthropic cache rates
+follow the documented multipliers: a 5-minute cache write is 1.25x base input, a cache read is 0.10x.
 
-| Rung   | Model ID           | Context | Input $/MTok | Output $/MTok |
-| ------ | ------------------ | ------- | ------------ | ------------- |
-| cheap  | `claude-haiku-4-5` | 200K    | 1.00         | 5.00          |
-| mid    | `claude-sonnet-5`  | 1M      | 2.00         | 10.00         |
-| strong | `claude-opus-5`    | 1M      | 5.00         | 25.00         |
+| Rung   | Model                 | Provider  | Input | Output | Cache read | Cache write |
+| ------ | --------------------- | --------- | ----- | ------ | ---------- | ----------- |
+| cheap  | `gpt-5-nano`          | OpenAI    | 0.05  | 0.40   | —          | —           |
+| cheap  | `openai/gpt-oss-20b`  | Groq      | 0.075 | 0.30   | —          | —           |
+| cheap  | `openai/gpt-oss-120b` | Groq      | 0.15  | 0.60   | —          | —           |
+| cheap  | `claude-haiku-4-5`    | Anthropic | 1.00  | 5.00   | 0.10       | 1.25        |
+| mid    | `gpt-5`               | OpenAI    | 1.25  | 10.00  | —          | —           |
+| mid    | `claude-sonnet-5`     | Anthropic | 2.00  | 10.00  | 0.20       | 2.50        |
+| strong | `claude-opus-5`       | Anthropic | 5.00  | 25.00  | 0.50       | 6.25        |
 
 **Correction to the project brief:** the model id `claude-haiku-4-5-20251001` is not valid. Current
-Claude model ids carry no date suffix. Using a date-suffixed id would fail at request time.
+Claude model ids carry no date suffix. The config schema now rejects date-suffixed ids at boot.
 
-**Not yet verified, must be fetched from official pricing pages in P1 before any number is used:**
-Groq per-model rates, OpenAI per-model rates, and Anthropic cache-read / cache-write multipliers.
-These are deliberately absent from this document rather than estimated.
+**Not in the ladder:** Groq's Llama models are published as "Enterprise — contact sales" with no
+per-token price. A rung with no published price cannot appear in a cost comparison. OpenAI and Groq
+cached-input rates are likewise unverified and stored as `null`, which the cost meter treats as
+"unknown" rather than zero — it refuses to record a cost rather than under-count one.
 
-### 7.2 The uncomfortable finding, stated up front
+### 7.2 Revising the P0 finding
 
-The cheap→strong spread is **5×**, not the 30–50× the brief implicitly assumes. Haiku→Sonnet is only
-**2×**. That has three consequences I would rather discover in Phase 0 than in Phase 5:
+P0 concluded from the Anthropic-only ladder that the cheap-to-strong spread was **5x** and that
+savings would therefore be modest. That was correct within Anthropic and wrong across the full
+ladder: `gpt-5-nano` to `claude-opus-5` is a **100x** input spread and a **62x** output spread.
 
-1. **The headline savings number will be modest.** Even perfect routing that sends every possible
-   request to Haiku instead of Opus saves 80%. Realistic mixed routing will land far lower. If the
-   README ends up claiming "-41% cost at no measured quality regression," that is the honest number
-   and it is still a good number. I will not be able to claim 90%.
-2. **Two non-routing levers have larger multipliers than routing does** and must therefore be
-   measured as competing arms, not assumed to be complementary:
-   - **Effort.** `output_config.effort` moves token spend substantially _within a single model_.
-     Anthropic's own cost guidance is explicit that the correct first experiment is "the strong model
-     at lower effort" before building a multi-model cascade. If Opus-at-`low` beats Haiku-at-default
-     on the cost/quality frontier, Verdict's thesis is weakened and I need to know that.
-   - **Batch API at 50%.** All of P2 and P3 is offline and latency-insensitive, so replay and judging
-     should run through the Batch API. This roughly halves the eval budget.
-3. **Prompt caching is model-scoped, so routing forfeits cache reuse.** A route whose traffic shares
-   a long system prefix gets large savings from cache hits — but only while it stays on one model.
-   Splitting that route's traffic across rungs fragments the cache namespace and can cost _more_ than
-   it saves. This is a real threat to the thesis (Section 11).
+The three consequences still stand, in revised form:
+
+1. **Headline savings now depend almost entirely on how much traffic can drop to a non-Anthropic
+   cheap rung.** That is an empirical question P5 answers, not an assumption. Within Anthropic alone
+   the ceiling really is 5x, so if quality forces every route onto a Claude rung, P0's pessimistic
+   number is the one that holds.
+2. **Two non-routing levers still have their own multipliers** and remain competing arms, not
+   complements:
+   - **Effort.** `output_config.effort` moves token spend within a single model. Anthropic's cost
+     guidance is explicit that "the strong model at lower effort" is the experiment to run before
+     building a multi-model cascade. If Opus-at-`low` beats Haiku-at-default on the frontier, the
+     thesis is weakened and I need to know that.
+   - **Batch API at 50%.** All of P2 and P3 is offline and latency-insensitive, so replay and
+     judging go through the Batch API. This roughly halves the eval budget.
+3. **Prompt caching is model-scoped, so routing forfeits cache reuse.** A cache read costs 0.10x
+   base input. A route whose traffic shares a long system prefix gets large savings from staying on
+   one model, and splitting it across rungs fragments the cache namespace. Now that the cache rates
+   are verified, P5 can measure this properly rather than flag it (Section 11, threat 1).
 
 ### 7.3 Config file shape
 

@@ -6,6 +6,8 @@ import {
   loadModelConfig,
   modelsAtRung,
   ModelConfigError,
+  nanoUsdPerToken,
+  nanoUsdToUsd,
   parseModelConfig,
 } from "./models.js";
 
@@ -197,5 +199,35 @@ describe("the committed config/models.yaml", () => {
 
   it("throws a clear error when the file is missing", () => {
     expect(() => loadModelConfig("/nonexistent/models.yaml")).toThrow(/cannot read models.yaml/);
+  });
+});
+
+describe("price precision", () => {
+  it("rejects a price that cannot be represented exactly in nano-USD", () => {
+    // $0.0001234/MTok would silently lose precision in integer nano-USD.
+    const bad = VALID.replace("input: 1.00", "input: 1.0001234");
+    expect(() => parseModelConfig(bad)).toThrow(/exact multiple of 0.001/);
+  });
+
+  it("accepts every published rate shape we actually use", () => {
+    for (const p of ["0.05", "0.075", "1.25", "2.50", "6.25", "12.50", "25.00"]) {
+      const cfg = VALID.replace("input: 1.00", `input: ${p}`);
+      expect(() => parseModelConfig(cfg), p).not.toThrow();
+    }
+  });
+
+  it("converts USD/MTok to integer nano-USD per token exactly", () => {
+    expect(nanoUsdPerToken(1.0)).toBe(1000);
+    expect(nanoUsdPerToken(0.075)).toBe(75);
+    expect(nanoUsdPerToken(25.0)).toBe(25000);
+    expect(nanoUsdPerToken(6.25)).toBe(6250);
+    expect(nanoUsdPerToken(0.05)).toBe(50);
+  });
+
+  it("round-trips nano-USD back to USD", () => {
+    expect(nanoUsdToUsd(1_000_000_000)).toBe(1);
+    expect(nanoUsdToUsd(0)).toBe(0);
+    // 1000 tokens at $1.00/MTok = 1000 * 1000 nano = 1e6 nano = $0.001
+    expect(nanoUsdToUsd(1000 * nanoUsdPerToken(1.0))).toBeCloseTo(0.001, 10);
   });
 });

@@ -11,13 +11,17 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.125.0",
     "@verdict/shared": "workspace:*",
     "fastify": "^5.2.0",
+    "openai": "^7.15.0",
+    "pg": "^8.23.0",
     "pino": "^9.5.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
+    "@types/pg": "^8.23.1",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
   }

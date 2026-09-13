@@ -28,6 +28,8 @@ COPY --from=build /repo/apps/gateway/package.json apps/gateway/
 COPY --from=build /repo/apps/gateway/node_modules apps/gateway/node_modules
 COPY config config
 
+ENV MODELS_CONFIG_PATH=/repo/config/models.yaml
+
 ARG GIT_SHA=unknown
 ENV GIT_SHA=$GIT_SHA
 

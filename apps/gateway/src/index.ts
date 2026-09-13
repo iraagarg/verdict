@@ -6,6 +6,7 @@
  * can be tested without starting a server.
  */
 import { buildApp } from "./app.js";
+import { buildServices } from "./services.js";
 import { EnvValidationError, loadEnv } from "./env.js";
 
 async function main(): Promise<void> {
@@ -21,12 +22,16 @@ async function main(): Promise<void> {
     throw err;
   }
 
-  const app = buildApp({ env });
+  const services = buildServices({ env });
+  const app = buildApp({ env, services });
 
   const shutdown = async (signal: string): Promise<void> => {
     app.log.info({ signal }, "shutting down");
     try {
       await app.close();
+      // Drain buffered traces before exiting; the queue is write-behind, so a
+      // hard exit here would discard whatever had not been flushed yet.
+      await services.close();
       process.exit(0);
     } catch (err) {
       app.log.error({ err }, "error during shutdown");

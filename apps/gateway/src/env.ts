@@ -39,6 +39,12 @@ const apiKey = z.preprocess(
 
 const port = z.coerce.number().int().min(1).max(65535);
 
+/** A URL that may be absent, where an empty string also means absent. */
+const optionalUrl = z.preprocess(
+  (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+  z.string().url().optional(),
+);
+
 export const EnvSchema = z
   .object({
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -65,8 +71,60 @@ export const EnvSchema = z
     GROQ_API_KEY: apiKey,
 
     COST_CAP_USD_PER_DAY: z.coerce.number().positive(),
+
+    // --- provider base URLs (overridden in tests to point at a mock server) ---
+    // Blank means unset, for the same reason provider keys do: compose passes
+    // every undeclared variable through as "".
+    ANTHROPIC_BASE_URL: optionalUrl,
+    OPENAI_BASE_URL: optionalUrl,
+    GROQ_BASE_URL: optionalUrl,
+
+    // --- timeouts (milliseconds) ---
+    /** Whole upstream call, including streaming. */
+    REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
+    /** How long we wait for the provider's first event before giving up. */
+    TTFT_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
+
+    // --- retry ---
+    /** RETRIES after the initial attempt. The gateway owns this, not the SDKs (D-013). */
+    MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(2),
+    RETRY_BASE_DELAY_MS: z.coerce.number().int().positive().default(250),
+    RETRY_MAX_DELAY_MS: z.coerce.number().int().positive().default(8_000),
+
+    // --- circuit breaker ---
+    BREAKER_FAILURE_THRESHOLD: z.coerce.number().int().min(1).default(5),
+    BREAKER_COOLDOWN_MS: z.coerce.number().int().min(0).default(30_000),
+
+    // --- trace write-behind queue (D-007) ---
+    TRACE_QUEUE_CAPACITY: z.coerce.number().int().min(1).default(10_000),
+    TRACE_BATCH_SIZE: z.coerce.number().int().min(1).default(25),
+    TRACE_FLUSH_INTERVAL_MS: z.coerce.number().int().positive().default(1_000),
+
+    PG_POOL_MAX: z.coerce.number().int().min(1).default(10),
+
+    /** Applied when the client sends no max_tokens; capped by the model's own limit. */
+    DEFAULT_MAX_OUTPUT_TOKENS: z.coerce.number().int().positive().default(16_384),
+
+    /** Path to the model ladder. Absolute in Docker, relative in dev. */
+    MODELS_CONFIG_PATH: z.string().min(1).default("config/models.yaml"),
   })
   .superRefine((env, ctx) => {
+    if (env.RETRY_MAX_DELAY_MS < env.RETRY_BASE_DELAY_MS) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["RETRY_MAX_DELAY_MS"],
+        message: "must be >= RETRY_BASE_DELAY_MS",
+      });
+    }
+    if (env.TTFT_TIMEOUT_MS > env.REQUEST_TIMEOUT_MS) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["TTFT_TIMEOUT_MS"],
+        message:
+          "must be <= REQUEST_TIMEOUT_MS; a first-token deadline longer than the whole-request deadline can never fire",
+      });
+    }
+
     // A gateway with no provider credentials can accept requests and satisfy
     // none of them. Better to refuse to start than to 500 on first traffic.
     const hasProvider =

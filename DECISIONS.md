@@ -404,3 +404,118 @@ boot costs a second and removes the precondition entirely.
 duplicate_object`). CI enforces this by applying the full migration set twice and requiring both
 runs to succeed. When migrations eventually need rollback or out-of-order application, that becomes
 its own decision entry rather than a library adopted silently.
+
+---
+
+## D-017 — Cost is metered from provider-reported usage only, with an explicit finality flag
+
+**Status:** ACCEPTED · **Date:** 2026-09-14 · **Phase:** P1 · **Affects:** P2–P6
+
+**Decision.** The cost meter records only token counts a provider actually reported. It updates the
+moment a usage-bearing event arrives and never estimates in between. Every trace carries
+`usage_is_final`, saying whether the provider confirmed its totals.
+
+**The constraint that forced the question.** "Cost computed incrementally during the stream" is
+literally achievable for Anthropic — input tokens arrive at `message_start` and a cumulative output
+count on every `message_delta` — but not for OpenAI or Groq, which report usage once in a final
+chunk. There is no way to make those two incremental without inventing numbers.
+
+**Alternatives rejected.**
+
+- _Local tokenizer estimate, reconciled at the end._ Would give a genuinely incremental figure on
+  every provider. Rejected because Anthropic's tokenizer is not public and `tiktoken` is wrong for
+  Claude, so the live figure would be a guess — and a guess that briefly occupies a cost field is
+  exactly what non-negotiable #1 forbids. The reconciliation would also hide how wrong the estimate
+  had been.
+- _Silently treat an unconfirmed count as final._ The simplest code and the most dangerous: a stream
+  that aborts mid-token yields a token count that is a FLOOR, and averaging those into P5's Pareto
+  curve would understate the cost of exactly the models that fail most often.
+
+**Rationale.** "Not after the stream" is satisfied without estimating: there is no second pass and no
+re-parsing of the response, so the number is final the instant the stream ends. Where a provider
+cannot support that, the honest move is to say so in a column rather than to fabricate a number that
+looks the same as a real one.
+
+**Consequence.** P2 onwards must filter to `usage_is_final = true` for any cost claim, and say that
+it does. The 0002 migration adds a partial index over unconfirmed rows so the exceptions are cheap
+to find.
+
+**Implementation note.** Arithmetic is integer nano-USD per token, not floating-point dollars. A
+long stream updates the meter thousands of times; float accumulation would drift, and the drift
+would land in the column that feeds every cost number in the project. The config schema enforces
+that every price is an exact multiple of $0.001/MTok so the conversion is lossless.
+
+---
+
+## D-018 — Provider adapters use the official SDKs
+
+**Status:** ACCEPTED · **Date:** 2026-09-14 · **Phase:** P1 · **Affects:** P1, P2
+
+**Decision.** `@anthropic-ai/sdk` for Claude, and the `openai` package for both OpenAI and Groq
+(Groq exposes an OpenAI-compatible endpoint, so one client class serves both via a `baseURL`
+override). `maxRetries: 0` on every client.
+
+**Alternatives rejected.**
+
+- _Raw `fetch` plus a hand-written SSE parser._ Maximum control, no dependency drift, and permits
+  byte-level passthrough for OpenAI and Groq. Rejected because we must translate Anthropic's
+  protocol into OpenAI's anyway, so byte passthrough is impossible on the rung that matters most —
+  and the remaining benefit is ~300 lines of `text/event-stream` framing whose bugs (multi-line
+  `data:`, comment frames, an event split across TCP chunks) only appear under load.
+- _Hybrid: SDK for Anthropic, raw for OpenAI/Groq._ Two error-mapping strategies and two code paths
+  for the same outcome.
+
+**Rationale.** The SDKs stream as async iterables of typed events, so "no buffering" is preserved.
+The interview value of this project is the cost meter, the breaker, the abort handling and the
+statistics — not a re-implementation of SSE framing.
+
+**Consequence.** `maxRetries: 0` is load-bearing, not incidental. The Anthropic SDK retries twice by
+default; leaving that on would mean two retry policies composing into an unpredictable one, and the
+circuit breaker would never observe the failures it exists to count (D-013).
+
+---
+
+## D-019 — Retry only before the first byte reaches the client
+
+**Status:** ACCEPTED · **Date:** 2026-09-14 · **Phase:** P1 · **Affects:** P1
+
+**Decision.** The retry wraps opening the upstream stream _and pulling its first event_, not the
+whole stream. Once any delta has been written to the client we are committed: a later failure
+produces a truncated-but-well-formed stream, never a retry.
+
+**Alternatives rejected.**
+
+- _Retry the whole stream._ Impossible without either buffering the entire response before sending
+  anything (which defeats streaming) or re-emitting text the client has already rendered.
+- _Buffer until complete, then send._ Correct retries, but turns a streaming proxy into a
+  non-streaming one and destroys the time-to-first-token that is the point of streaming.
+
+**Rationale.** There is no way to un-say text a client has already displayed. Naming the commit
+point explicitly is what makes the failure behaviour predictable: before it, transient errors are
+invisible to the user; after it, they are a clean truncation with `finish_reason: "length"` and a
+`[DONE]`, so the client's parser terminates instead of hanging.
+
+---
+
+## D-020 — Client disconnect is detected on the response stream, not the request stream
+
+**Status:** ACCEPTED · **Date:** 2026-09-14 · **Phase:** P1 · **Affects:** P1
+
+**Decision.** The disconnect listener is `reply.raw.on("close")`, guarded by
+`if (reply.raw.writableEnded) return`. Not `req.raw.on("close")`.
+
+**Why this is written down.** The obvious implementation is wrong in a way that passes review. For a
+Node `IncomingMessage`, `close` fires when the **request body has been fully read** — which for a
+normal POST is immediately, long before the client goes anywhere. Listening there made every
+streaming request look like an instant disconnect: the gateway aborted its own upstream call and
+returned an empty HTTP 200 with no error and nothing in the logs.
+
+Every `inject()`-based test passed, because `inject()` never exercises a real socket. Only the
+integration tests that listen on a real port and speak real HTTP caught it.
+
+**Rationale.** A response socket closing while `writableEnded` is still false is the only signal that
+actually means "the peer went away mid-response."
+
+**Consequence.** Tests for anything socket-lifecycle-shaped must use a real listener. That is why
+`apps/gateway/src/testing/mock-provider.ts` is an actual HTTP server rather than a stubbed adapter —
+a stub cannot reproduce a socket destroyed mid-stream, which is the other case that matters here.

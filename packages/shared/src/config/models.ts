@@ -23,14 +23,33 @@ export class ModelConfigError extends Error {
   override readonly name = "ModelConfigError";
 }
 
+/**
+ * A price in USD per million tokens, constrained to an exact multiple of
+ * $0.001/MTok.
+ *
+ * The cost meter converts each price to an integer number of nano-USD per token
+ * (`price * 1000`) so that token accounting is exact integer arithmetic and
+ * never accumulates floating-point error across a long stream. That conversion
+ * is only lossless if the price has at most three decimal places. Every
+ * published rate we use satisfies this ($0.075, $1.25, $12.50), so enforcing it
+ * here turns a silent precision bug into a boot failure.
+ */
+const price = z
+  .number()
+  .nonnegative()
+  .refine((v) => Math.abs(v * 1000 - Math.round(v * 1000)) < 1e-9, {
+    message:
+      "must be an exact multiple of 0.001 USD/MTok so cost can be computed in integer nano-USD",
+  });
+
 /** USD per million tokens. */
 const Pricing = z
   .object({
-    input: z.number().nonnegative(),
-    output: z.number().nonnegative(),
+    input: price,
+    output: price,
     /** `null` means "not yet verified" — NOT zero. Cost code must fail on null. */
-    cache_read: z.number().nonnegative().nullable(),
-    cache_write: z.number().nonnegative().nullable(),
+    cache_read: price.nullable(),
+    cache_write: price.nullable(),
     verified_at: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "verified_at must be YYYY-MM-DD"),
     source: z.string().url("source must be a URL pointing at official pricing documentation"),
   })
@@ -185,4 +204,19 @@ export function modelsAtRung(cfg: ModelConfig, rung: Rung): string[] {
     .filter(([, m]) => m.rung === rung)
     .sort(([, a], [, b]) => a.pricing.input - b.pricing.input)
     .map(([id]) => id);
+}
+
+/**
+ * Integer nano-USD per token for a price expressed in USD per million tokens.
+ *
+ * $1.00/MTok = 1e-6 USD/token = 1000 nano-USD/token. The schema guarantees the
+ * input has at most three decimals, so this is exact.
+ */
+export function nanoUsdPerToken(usdPerMillionTokens: number): number {
+  return Math.round(usdPerMillionTokens * 1000);
+}
+
+/** Convert integer nano-USD to USD, rounded to the 8 decimals the schema stores. */
+export function nanoUsdToUsd(nanoUsd: number): number {
+  return Math.round(nanoUsd / 10) / 1e8;
 }

@@ -78,6 +78,13 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       COST_CAP_USD_PER_DAY: ${COST_CAP_USD_PER_DAY:-5.00}
+      # Point a provider at a local mock to exercise streaming without spending
+      # money. Unset in normal use.
+      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      GROQ_BASE_URL: ${GROQ_BASE_URL:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "8080:8080"
     depends_on:
