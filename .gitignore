@@ -15,3 +15,7 @@ __pycache__/
 .env
 .env.local
 .DS_Store
+
+# Replay response cache. Content-addressed and reproducible, but ~10s of MB and
+# regenerable, so it is not committed. Deleting it only costs money to refill.
+.cache/

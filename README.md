@@ -65,10 +65,28 @@ Response headers carry what Verdict did, so the body stays a byte-for-byte OpenA
 
 ```bash
 make install      # pnpm workspace + evald virtualenv (Python 3.12)
-make test         # 156 TypeScript tests, 25 Python tests
+make test         # 156 TypeScript tests, 153 Python tests
 make lint         # eslint, prettier, ruff
 make typecheck    # tsc --strict, mypy --strict
 ```
+
+## Benchmarking
+
+```bash
+make corpus                 # rebuild the frozen corpus from public datasets (free)
+make plan CAP=30            # show projected cost. Spends nothing.
+make pilot CAP=1 N=200      # measure whether the gradable slice discriminates
+make bench CAP=30           # run it; writes a versioned artifact
+```
+
+`make bench` refuses to start without a spend cap, prints a projection before spending anything, and
+aborts hard if the cap is reached — writing a partial artifact marked `aborted_budget` so a truncated
+run can never be mistaken for a complete one. Every result is written to a content-addressed cache,
+so a second run makes zero paid calls.
+
+The corpus is **1,500 items**: 1,200 gradable (GSM8K, MMLU-Pro — scored by exact match, no judge
+needed) and 300 free-form (summarisation, long-form QA, support replies — these need the judge).
+Every item records its source dataset, id and licence.
 
 ## Layout
 
@@ -81,6 +99,7 @@ apps/dashboard   Next.js. Pareto curve, per-route spend, trace explorer.  (P7)
 packages/shared  Shared TypeScript types and Zod schemas.
 config/          Model ladder and pricing. Every price cites its source.
 db/migrations/   Plain SQL, applied by the compose `migrate` service.
+corpus/          The frozen benchmark corpus. Never edited; corrections get a new slug.
 artifacts/       Committed benchmark output. The only source of any number.
 ```
 
@@ -90,8 +109,8 @@ artifacts/       Committed benchmark output. The only source of any number.
 | ----- | -------------------------------------------------------------- | ------ |
 | P0    | Design, decisions, scaffold, CI, docker compose                | done   |
 | P1    | Gateway: streaming proxy, adapters, traces, cost accounting    | done   |
-| P2    | Benchmark corpus + deterministic replay runner                 | next   |
-| P3    | LLM-as-judge + calibration against human labels (Cohen's κ)    |        |
+| P2    | Benchmark corpus + deterministic replay runner                 | done   |
+| P3    | LLM-as-judge + calibration against human labels (Cohen's κ)    | next   |
 | P4    | Paired bootstrap CIs, McNemar, regression-vs-noise verdicts    |        |
 | P5    | Cascade router, threshold fitting, Pareto curve                |        |
 | P6    | Semantic cache with calibrated threshold; hit + false-hit rate |        |

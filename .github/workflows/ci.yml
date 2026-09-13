@@ -67,6 +67,9 @@ jobs:
 
       - run: pip install -e ".[dev]"
 
+      - name: Corpus is present and well-formed
+        run: pytest -q tests/test_cli.py -k CommittedCorpus
+
       - name: Lint
         run: ruff check src tests
 

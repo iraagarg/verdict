@@ -11,6 +11,8 @@ export default tseslint.config(
       "**/node_modules/**",
       "**/coverage/**",
       "artifacts/**",
+      "corpus/**",
+      ".cache/**",
       // The evald virtualenv ships vendored JavaScript (pip bundles a urllib3
       // emscripten worker). It is not ours and must not be linted.
       "**/.venv/**",

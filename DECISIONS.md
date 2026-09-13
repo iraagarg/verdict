@@ -519,3 +519,126 @@ actually means "the peer went away mid-response."
 **Consequence.** Tests for anything socket-lifecycle-shaped must use a real listener. That is why
 `apps/gateway/src/testing/mock-provider.ts` is an actual HTTP server rather than a stubbed adapter —
 a stub cannot reproduce a socket destroyed mid-stream, which is the other case that matters here.
+
+---
+
+## D-021 — 1,200 gradable + 300 free-form, not an even split
+
+**Status:** ACCEPTED · **Date:** 2026-09-14 · **Phase:** P2 · **Affects:** P3, P4, P5
+
+**Decision.** ~1,500 items as briefed, but split 1,200 gradable (GSM8K, MMLU-Pro) to 300 free-form
+(CNN/DailyMail summarisation, Dolly long-form QA, Bitext support replies) rather than 750/750.
+
+**Rationale.** The gradable slice is scored by an exact deterministic verifier, so it needs **no LLM
+judge at all**. The free-form slice needs a judge on every item, in both A/B positions, times
+replicates. Free-form size therefore drives essentially the whole P3 bill; gradable size is nearly
+free by comparison. Planning estimates at the time of the decision:
+
+| Split       | Replay (7 rungs) | P3 judge | Total |
+| ----------- | ---------------- | -------- | ----- |
+| 750 / 750   | ~$23             | ~$216    | ~$240 |
+| 1,200 / 300 | ~$19             | ~$43     | ~$62  |
+
+Same corpus size; one fits the D-002 budget and the other is 3x over it. The measured projection for
+the final corpus is **$28.91** for 13,300 calls including K=3 replicates.
+
+**Alternatives rejected.** _750/750 as briefed_ — widest judge coverage, but unaffordable without
+raising the budget or dropping to one replicate and a cheaper judge. _600/300_ — cheapest, but gives
+up statistical power on the slice that costs almost nothing to scale.
+
+**Consequence.** Routing conclusions on verifiable tasks will have much tighter confidence intervals
+than on free-form tasks. That asymmetry must be stated in P5 rather than glossed over: the strong
+claim is about extraction/classification-shaped work, and the free-form claim is weaker.
+
+---
+
+## D-022 — Difficulty is measured by a pilot, not assumed
+
+**Status:** ACCEPTED · **Date:** 2026-09-14 · **Phase:** P2 · **Affects:** P3, P5
+
+**Decision.** Use MMLU-**Pro** (10 options, built to resist ceiling effects) rather than MMLU, then
+run a ~200-item pilot across three rungs and keep only items where the rungs actually disagree — at
+least one pass and at least one fail. The pass rates before and after are written to
+`artifacts/difficulty-pilot.json`.
+
+**The problem this solves.** GSM8K and MMLU are among the most-quoted public benchmarks and are
+near-certainly in training data. If every rung scores ~95%, then the judge has almost no losses to
+be validated against — Cohen's κ would be computed on a degenerate distribution — and routing has
+nothing to learn, because every rung looks identical. DESIGN.md §9.1 rejected public eval sets partly
+for this reason; using them for _judge validation_ is defensible, but only if they discriminate.
+
+**Alternatives rejected.** _Plain GSM8K + MMLU_ — simplest and most recognisable, but a ceiling
+effect would not surface until P3 or P5, after the money was spent. _Harder variants only_ — still
+assumes rather than measures. _Filter only, no harder source_ — would discard most of a contaminated
+pool to find a thin discriminative band.
+
+**Rationale.** It converts contamination from a threat we hope is absent into a number we report.
+"I measured the pass-rate spread and filtered to the discriminative band" is a far stronger answer
+than "I used GSM8K."
+
+**Consequence.** The filtered corpus is no longer a uniform sample of GSM8K/MMLU-Pro, so it cannot be
+compared to published accuracy figures on those benchmarks. That is an acceptable trade — Verdict
+measures _relative_ rung quality, not absolute benchmark scores — but the README must say so.
+
+---
+
+## D-023 — Replicates: K=3 on a 200-item subset, K=1 elsewhere
+
+**Status:** ACCEPTED · **Date:** 2026-09-14 · **Phase:** P2 · **Affects:** P4
+
+**Decision.** Three samples per (item, model) for the first 200 slugs; one sample for the rest. The
+measured within-model variance is then propagated when widening confidence intervals corpus-wide.
+
+**Rationale.** D-009 established that `temperature` cannot be pinned on Claude Opus 5 or Sonnet 5
+(HTTP 400), so sampling variance is real and must be measured rather than eliminated. Measuring it
+everywhere would triple replay cost (~$57 instead of ~$19 on this corpus); measuring it on a subset
+costs ~15% extra. "I measured the variance on a subset and propagated it" is what a statistician
+would actually do.
+
+**Consequence.** Determinism is **asymmetric across the ladder** — the OpenAI and Groq rungs are
+pinned at `temperature: 0`, the Anthropic mid and strong rungs are not — and `request_params` encodes
+exactly that from each model's capability table. Per-item error bars outside the subset are
+propagated, not directly observed, and P4 must label them that way.
+
+---
+
+## D-024 — Replay runs through the gateway, not directly against providers
+
+**Status:** ACCEPTED · **Date:** 2026-09-14 · **Phase:** P2 · **Affects:** P3, P5
+
+**Decision.** The replay runner is an HTTP client of the P1 gateway. Batch API support is deferred
+behind the same `complete()` interface.
+
+**Rationale.** Every benchmark run then exercises the real adapters, cost meter, retry policy,
+circuit breaker and parameter normalisation, and produces real trace rows. A second path straight to
+the providers would be a second cost implementation that could silently disagree with the one
+serving production traffic — and the entire project rests on those two numbers being the same.
+
+**Alternatives rejected.** _Batch API from the start_ — halves cost immediately, but bypasses the
+gateway entirely (no traces, no streaming, different endpoint) and needs job submission, polling and
+result reconciliation before anything runs at all. _Direct provider SDK calls_ — fastest to write,
+but forfeits the dogfooding and duplicates cost logic.
+
+**Consequence.** `make bench` requires the stack to be up. The 50% Batch discount is left on the
+table in P2 and should be taken in P3, where judging is the dominant cost.
+
+---
+
+## D-025 — Duplicate prompts are rejected at corpus assembly
+
+**Status:** ACCEPTED · **Date:** 2026-09-14 · **Phase:** P2 · **Affects:** P4
+
+**Decision.** `build_corpus` raises if two items share prompt text, and every source loader
+deduplicates before sampling.
+
+**Why this is written down.** It was found by a test, then confirmed on real data: the Bitext support
+dataset contains repeated customer messages, and the first real corpus build failed on
+`support_reply-0033` duplicating `support_reply-0014`.
+
+The replay cache is content-addressed on (model, messages, params, replicate). Two items with
+identical prompts therefore **share a single generation** while being counted as two independent
+observations. That is not a cosmetic problem: it understates variance and narrows every confidence
+interval built on them, which is precisely the error P4 exists to avoid making.
+
+**Consequence.** Source loaders scan a wider window than they need (up to 60x the target for Bitext)
+because deduplication removes a large fraction of candidates.

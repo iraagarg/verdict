@@ -1,4 +1,4 @@
-.PHONY: help install dev up down logs test lint typecheck fmt migrate bench clean
+.PHONY: help install dev up down logs test lint typecheck fmt migrate corpus plan pilot bench clean
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -40,13 +40,24 @@ fmt: ## Auto-format everything
 migrate: ## Apply database migrations to $DATABASE_URL
 	@for f in db/migrations/*.sql; do echo "applying $$f"; psql "$${DATABASE_URL:?set DATABASE_URL}" -v ON_ERROR_STOP=1 -f "$$f"; done
 
-bench: ## Run the full benchmark and write artifacts/ — NOT IMPLEMENTED UNTIL P2
-	@echo "make bench is defined in P2 (replay runner)."
-	@echo "It must write committed artifacts under artifacts/ and be reproducible at \$$0."
-	@echo "Per non-negotiable #1: until this target produces artifacts, Verdict has no numbers."
-	@exit 1
+corpus: ## Rebuild the frozen benchmark corpus from public datasets (free, no API key)
+	cd apps/evald && .venv/bin/python -m evald.cli corpus build
+
+plan: ## Show the projected cost of a full replay. Spends nothing.
+	cd apps/evald && .venv/bin/python -m evald.cli replay plan --cap $(CAP)
+
+pilot: ## Measure whether the gradable slice discriminates between rungs (needs a key)
+	cd apps/evald && .venv/bin/python -m evald.cli pilot --cap $(CAP) -n $(N)
+
+bench: ## Run the full replay and write a versioned artifact. Re-runs are free.
+	@test -n "$(CAP)" || (echo "refusing to run without a spend cap: make bench CAP=30" && exit 1)
+	cd apps/evald && .venv/bin/python -m evald.cli replay run --cap $(CAP)
 
 clean: ## Remove build outputs and virtualenvs
 	rm -rf node_modules apps/*/node_modules packages/*/node_modules
 	rm -rf apps/*/dist packages/*/dist apps/dashboard/.next
 	rm -rf apps/evald/.venv apps/evald/.pytest_cache apps/evald/.ruff_cache apps/evald/.mypy_cache
+
+# Default spend cap and pilot size. Override: make bench CAP=30
+CAP ?= 5
+N ?= 200

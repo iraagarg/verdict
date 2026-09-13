@@ -4,3 +4,6 @@ pnpm-lock.yaml
 artifacts/**
 **/.venv/**
 db/migrations/**
+corpus/**
+.cache/**
+artifacts/**

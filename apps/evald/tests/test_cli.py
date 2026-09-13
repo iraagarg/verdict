@@ -1,0 +1,105 @@
+"""CLI wiring: the projection gate must stand between a command and any spend."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from evald.cli import _replicate_map, build_parser, load_corpus, write_corpus
+from evald.corpus.schema import CorpusItem
+
+CORPUS = Path("../../corpus/items.jsonl")
+
+
+def item(slug: str) -> CorpusItem:
+    return CorpusItem(
+        slug=slug,
+        task_type="summarization",
+        split="test",
+        verifiable=False,
+        messages=[{"role": "user", "content": f"article {slug}"}],
+        source_dataset="abisee/cnn_dailymail",
+        source_id=slug,
+        source_license="Apache-2.0",
+    )
+
+
+def test_cap_is_mandatory_on_every_spending_command() -> None:
+    # No command that can spend money may default its cap.
+    parser = build_parser()
+    for argv in (["replay", "plan"], ["replay", "run"], ["pilot"]):
+        with pytest.raises(SystemExit):
+            parser.parse_args(argv)
+
+
+def test_cap_is_parsed_when_supplied() -> None:
+    args = build_parser().parse_args(["replay", "plan", "--cap", "12.5"])
+    assert args.cap == 12.5
+
+
+def test_corpus_round_trips(tmp_path: Path) -> None:
+    items = [item("a-1"), item("b-1")]
+    path = tmp_path / "items.jsonl"
+    write_corpus(items, path)
+    assert load_corpus(path) == items
+
+
+def test_missing_corpus_is_a_clear_error(tmp_path: Path) -> None:
+    with pytest.raises(SystemExit, match="corpus build"):
+        load_corpus(tmp_path / "nope.jsonl")
+
+
+class TestReplicateMap:
+    def test_applies_k_to_a_bounded_subset_only(self) -> None:
+        items = [item(f"s-{i:03d}") for i in range(50)]
+        reps = _replicate_map(items, subset=10, k=3)
+        assert len(reps) == 10
+        assert set(reps.values()) == {3}
+
+    def test_is_deterministic(self) -> None:
+        items = [item(f"s-{i:03d}") for i in range(50)]
+        assert _replicate_map(items, 10, 3) == _replicate_map(items, 10, 3)
+
+    def test_disabled_when_k_is_one(self) -> None:
+        items = [item(f"s-{i:03d}") for i in range(10)]
+        assert _replicate_map(items, 10, 1) == {}
+
+
+class TestCommittedCorpus:
+    """Guards the real corpus that P3-P5 will consume."""
+
+    def test_exists_and_is_the_agreed_size(self) -> None:
+        items = load_corpus(CORPUS)
+        assert len(items) == 1500
+
+    def test_splits_the_way_the_design_says(self) -> None:
+        items = load_corpus(CORPUS)
+        counts = {s: sum(1 for i in items if i.split == s) for s in ("calibration", "dev", "test")}
+        assert counts == {"calibration": 300, "dev": 450, "test": 750}
+
+    def test_is_1200_gradable_plus_300_free_form(self) -> None:
+        # D-021: only the free-form slice costs judge money in P3.
+        items = load_corpus(CORPUS)
+        assert sum(1 for i in items if i.verifiable) == 1200
+        assert sum(1 for i in items if not i.verifiable) == 300
+
+    def test_every_item_cites_its_source_and_licence(self) -> None:
+        for i in load_corpus(CORPUS):
+            assert i.source_dataset and i.source_id and i.source_license
+
+    def test_every_gradable_item_has_a_working_verifier(self) -> None:
+        from evald.corpus.verifiers import REGISTRY
+
+        for i in load_corpus(CORPUS):
+            if i.verifiable:
+                assert i.verifier in REGISTRY
+                assert i.ground_truth
+
+    def test_prompts_are_unique(self) -> None:
+        texts = [i.prompt_text() for i in load_corpus(CORPUS)]
+        assert len(set(texts)) == len(texts)
+
+    def test_slugs_are_unique(self) -> None:
+        slugs = [i.slug for i in load_corpus(CORPUS)]
+        assert len(set(slugs)) == len(slugs)

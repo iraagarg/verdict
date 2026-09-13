@@ -1,0 +1,306 @@
+"""evald command line.
+
+    evald corpus build        assemble the frozen corpus from public datasets
+    evald replay plan         print the projected cost and STOP
+    evald replay run          execute, writing a versioned run artifact
+    evald pilot               measure difficulty so the filter is evidence-based
+
+`replay run` refuses to spend anything until a projection has been shown and a
+cap supplied. Non-negotiable #1 applies here: a run either produces a committed
+artifact or it produced nothing.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+import uuid
+from collections import Counter
+from pathlib import Path
+
+from evald.corpus import sources
+from evald.corpus.assemble import PilotResult, build_corpus, filter_by_difficulty
+from evald.corpus.schema import CorpusItem, corpus_sha256
+from evald.models_config import load_model_config
+from evald.replay.artifact import ModelSummary, RunArtifact, git_sha, now_iso, pricing_snapshot
+from evald.replay.budget import Budget
+from evald.replay.cache import ResponseCache, cache_key
+from evald.replay.client import GatewayClient
+from evald.replay.plan import TOKEN_ESTIMATE_METHOD, compare_projection, project_run
+from evald.replay.runner import build_tasks, request_params, run_replay, summarise
+
+DEFAULT_CORPUS = Path("../../corpus/items.jsonl")
+DEFAULT_CACHE = Path("../../.cache/replay")
+DEFAULT_ARTIFACTS = Path("../../artifacts")
+
+#: 1,200 gradable + 300 free-form. Only the free-form slice costs judge money in
+#: P3, so the volume lives where it is cheap (DECISIONS.md D-021).
+DEFAULT_TARGETS = {
+    "math_word_problem": 600,
+    "multiple_choice": 600,
+    "summarization": 100,
+    "long_form_qa": 100,
+    "support_reply": 100,
+}
+
+
+def load_corpus(path: Path) -> list[CorpusItem]:
+    if not path.is_file():
+        raise SystemExit(f"no corpus at {path}. Run `evald corpus build` first.")
+    return [
+        CorpusItem.model_validate_json(line)
+        for line in path.read_text().splitlines()
+        if line.strip()
+    ]
+
+
+def write_corpus(items: list[CorpusItem], path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "".join(json.dumps(i.model_dump(), sort_keys=True) + "\n" for i in items),
+        encoding="utf-8",
+    )
+
+
+def cmd_corpus_build(args: argparse.Namespace) -> int:
+    print("loading source datasets (this downloads from HuggingFace)...", file=sys.stderr)
+    raw = {
+        "math_word_problem": sources.gsm8k(args.targets["math_word_problem"] * 2),
+        "multiple_choice": sources.mmlu_pro(args.targets["multiple_choice"] * 2),
+        "summarization": sources.cnn_summarization(args.targets["summarization"] * 6),
+        "long_form_qa": sources.dolly_long_form_qa(args.targets["long_form_qa"]),
+        "support_reply": sources.bitext_support_reply(args.targets["support_reply"]),
+    }
+    for task, pool in raw.items():
+        print(f"  {task:<20} {len(pool):>5} candidates", file=sys.stderr)
+
+    items = build_corpus(raw, args.targets, seed=args.seed)
+    write_corpus(items, args.out)
+
+    by_task = Counter(i.task_type for i in items)
+    by_split = Counter(i.split for i in items)
+    print(f"\nwrote {len(items)} items to {args.out}")
+    print(f"  sha256   {corpus_sha256(items)}")
+    print(f"  by task  {dict(sorted(by_task.items()))}")
+    print(f"  by split {dict(sorted(by_split.items()))}")
+    print(f"  gradable {sum(1 for i in items if i.verifiable)}")
+    print("\nNext: `evald pilot` to measure difficulty before filtering.")
+    return 0
+
+
+def _models(args: argparse.Namespace, config_models: list[str]) -> list[str]:
+    return args.models.split(",") if args.models else config_models
+
+
+def cmd_replay_plan(args: argparse.Namespace) -> int:
+    config = load_model_config(args.config)
+    items = load_corpus(args.corpus)
+    models = _models(args, config.by_cost())
+    cache = ResponseCache(args.cache)
+
+    reps = _replicate_map(items, args.replicate_subset, args.replicates)
+    cached = sum(
+        1
+        for item in items
+        for m in models
+        for k in range(reps.get(item.slug, 1))
+        if cache_key(m, item.messages, request_params(m, config, args.max_tokens), k) in cache
+    )
+
+    projection = project_run(items, models, config, replicates=reps, already_cached=cached)
+    print(projection.render(cap_usd=args.cap))
+    print(f"\ncorpus: {len(items)} items, sha256 {corpus_sha256(items)[:16]}...")
+    print("\nNothing has been spent. Run `evald replay run --cap <usd>` to execute.")
+    return 0
+
+
+def _replicate_map(items: list[CorpusItem], subset: int, k: int) -> dict[str, int]:
+    """K replicates on the first `subset` slugs, 1 elsewhere.
+
+    D-009 made sampling variance something we measure rather than eliminate,
+    because temperature cannot be pinned on the Anthropic rungs. Measuring it on
+    a subset costs ~15% extra instead of 200% (DECISIONS.md D-022).
+    """
+    if subset <= 0 or k <= 1:
+        return {}
+    chosen = sorted(i.slug for i in items)[:subset]
+    return dict.fromkeys(chosen, k)
+
+
+def cmd_replay_run(args: argparse.Namespace) -> int:
+    config = load_model_config(args.config)
+    items = load_corpus(args.corpus)
+    models = _models(args, config.by_cost())
+    cache = ResponseCache(args.cache)
+    reps = _replicate_map(items, args.replicate_subset, args.replicates)
+
+    projection = project_run(items, models, config, replicates=reps)
+    print(projection.render(cap_usd=args.cap))
+
+    if projection.total_cost_usd > args.cap and not args.yes:
+        print(
+            f"\nRefusing to start: projection ${projection.total_cost_usd:.4f} exceeds "
+            f"cap ${args.cap:.2f}. Raise --cap, cut --models, or pass --yes to run until "
+            f"the cap aborts it.",
+            file=sys.stderr,
+        )
+        return 2
+
+    if not args.yes:
+        reply = input("\nProceed? [y/N] ").strip().lower()
+        if reply != "y":
+            print("aborted; nothing spent.")
+            return 1
+
+    with GatewayClient(args.gateway) as client:
+        if not client.health():
+            raise SystemExit(f"gateway at {args.gateway} is not healthy; start it with `make up`.")
+
+        budget = Budget(cap_usd=args.cap)
+        tasks = build_tasks(items, models, replicates=reps)
+        stats = run_replay(
+            tasks,
+            config,
+            cache,
+            client.complete,
+            budget,
+            max_output_tokens=args.max_tokens,
+            concurrency=args.concurrency,
+        )
+
+    summaries = summarise(stats, config)
+    actual = round(sum(s["cost_usd"] for s in summaries), 8)
+
+    artifact = RunArtifact(
+        run_id=args.run_id or str(uuid.uuid4()),
+        created_at=now_iso(),
+        git_sha=git_sha(),
+        seed=args.seed,
+        corpus_sha256=corpus_sha256(items),
+        corpus_size=len(items),
+        corpus_by_split=dict(sorted(Counter(i.split for i in items).items())),
+        corpus_by_task=dict(sorted(Counter(i.task_type for i in items).items())),
+        models=models,
+        pricing_snapshot=pricing_snapshot(models, config),
+        replicates=reps,
+        status="aborted_budget" if stats.aborted else "complete",
+        abort_reason=stats.aborted,
+        summaries=[ModelSummary.model_validate(s) for s in summaries],
+        cost=compare_projection(projection.total_cost_usd, actual),
+        cache={
+            "hits": float(cache.stats.hits),
+            "misses": float(cache.stats.misses),
+            "hit_rate": round(cache.stats.hit_rate, 4),
+        },
+        token_estimate_method=TOKEN_ESTIMATE_METHOD,
+        errors_by_kind=stats.errors_by_kind,
+    )
+
+    out = artifact.write(Path(args.artifacts) / f"replay-{artifact.run_id[:8]}.json")
+    print(f"\nartifact: {out}")
+    print(f"status:   {artifact.status}")
+    print(f"spent:    ${actual:.4f} (projected ${projection.total_cost_usd:.4f})")
+    if stats.aborted:
+        print(f"ABORTED:  {stats.aborted}", file=sys.stderr)
+        return 3
+    return 0
+
+
+def cmd_pilot(args: argparse.Namespace) -> int:
+    """Measure whether the gradable slice actually discriminates between rungs."""
+    config = load_model_config(args.config)
+    items = [i for i in load_corpus(args.corpus) if i.verifiable][: args.n]
+    models = _models(args, ["openai/gpt-oss-20b", "claude-haiku-4-5", "claude-opus-5"])
+
+    projection = project_run(items, models, config)
+    print(projection.render(cap_usd=args.cap))
+    if not args.yes and input("\nProceed? [y/N] ").strip().lower() != "y":
+        return 1
+
+    with GatewayClient(args.gateway) as client:
+        stats = run_replay(
+            build_tasks(items, models),
+            config,
+            ResponseCache(args.cache),
+            client.complete,
+            Budget(cap_usd=args.cap),
+            max_output_tokens=args.max_tokens,
+            concurrency=args.concurrency,
+        )
+
+    results = [
+        PilotResult(slug=o.task.item.slug, model=o.task.model, passed=bool(o.verifier_pass))
+        for o in stats.outcomes
+        if o.error_kind is None and o.verifier_pass is not None
+    ]
+    kept, report = filter_by_difficulty(load_corpus(args.corpus), results)
+
+    Path(args.artifacts).mkdir(parents=True, exist_ok=True)
+    report_path = Path(args.artifacts) / "difficulty-pilot.json"
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+
+    print(f"\npilot report: {report_path}")
+    print(json.dumps(report, indent=2, sort_keys=True))
+    if args.apply:
+        write_corpus(kept, args.corpus)
+        print(f"\nfiltered corpus written: {len(kept)} items (was {len(load_corpus(args.corpus))})")
+    else:
+        print("\nRe-run with --apply to filter the corpus to the discriminative band.")
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="evald")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    def common(sp: argparse.ArgumentParser) -> None:
+        sp.add_argument("--config", default="../../config/models.yaml")
+        sp.add_argument("--corpus", type=Path, default=DEFAULT_CORPUS)
+        sp.add_argument("--cache", type=Path, default=DEFAULT_CACHE)
+        sp.add_argument("--artifacts", type=Path, default=DEFAULT_ARTIFACTS)
+        sp.add_argument("--gateway", default="http://localhost:8080")
+        sp.add_argument(
+            "--models", default="", help="comma-separated; defaults to the whole ladder"
+        )
+        sp.add_argument("--max-tokens", type=int, default=1024)
+        sp.add_argument("--concurrency", type=int, default=8)
+        sp.add_argument("--cap", type=float, required=True, help="hard USD spend cap")
+        sp.add_argument("--yes", action="store_true")
+        sp.add_argument("--seed", type=int, default=20260914)
+        sp.add_argument("--replicates", type=int, default=3)
+        sp.add_argument("--replicate-subset", type=int, default=200)
+
+    corpus = sub.add_parser("corpus").add_subparsers(dest="sub", required=True)
+    cb = corpus.add_parser("build")
+    cb.add_argument("--out", type=Path, default=DEFAULT_CORPUS)
+    cb.add_argument("--seed", type=int, default=20260914)
+    cb.set_defaults(func=cmd_corpus_build, targets=DEFAULT_TARGETS)
+
+    replay = sub.add_parser("replay").add_subparsers(dest="sub", required=True)
+    rp = replay.add_parser("plan")
+    common(rp)
+    rp.set_defaults(func=cmd_replay_plan)
+
+    rr = replay.add_parser("run")
+    common(rr)
+    rr.add_argument("--run-id", default="")
+    rr.set_defaults(func=cmd_replay_run)
+
+    pilot = sub.add_parser("pilot")
+    common(pilot)
+    pilot.add_argument("-n", type=int, default=200)
+    pilot.add_argument("--apply", action="store_true")
+    pilot.set_defaults(func=cmd_pilot)
+
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    result: int = args.func(args)
+    return result
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
