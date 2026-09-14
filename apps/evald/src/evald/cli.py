@@ -28,6 +28,7 @@ from evald.replay.budget import Budget
 from evald.replay.cache import ResponseCache, cache_key
 from evald.replay.client import GatewayClient
 from evald.replay.plan import TOKEN_ESTIMATE_METHOD, compare_projection, project_run
+from evald.replay.ratelimit import NullRateLimiter, RateLimiter
 from evald.replay.runner import build_tasks, request_params, run_replay, summarise
 
 DEFAULT_CORPUS = Path("../../corpus/items.jsonl")
@@ -167,6 +168,7 @@ def cmd_replay_run(args: argparse.Namespace) -> int:
             budget,
             max_output_tokens=args.max_tokens,
             concurrency=args.concurrency,
+            rate_limiter=RateLimiter(rpm=args.rpm) if args.rpm > 0 else NullRateLimiter(),
         )
 
     summaries = summarise(stats, config)
@@ -207,10 +209,39 @@ def cmd_replay_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def _pilot_sample(items: list[CorpusItem], n: int, seed: int) -> list[CorpusItem]:
+    """A seeded, STRATIFIED sample of the gradable slice.
+
+    Taking the first n verifiable items looks reasonable and is wrong: slugs
+    sort alphabetically, so `math_word_problem` comes before `multiple_choice`
+    and a 100-item pilot tests only GSM8K. The MMLU-Pro half — the half chosen
+    specifically to resist ceiling effects — would never be measured, and the
+    pass rates would be silently attributed to the whole gradable slice.
+    """
+    import random
+
+    gradable = [i for i in items if i.verifiable]
+    by_task: dict[str, list[CorpusItem]] = {}
+    for item in gradable:
+        by_task.setdefault(item.task_type, []).append(item)
+
+    if not by_task:
+        return []
+
+    per_task = max(1, n // len(by_task))
+    chosen: list[CorpusItem] = []
+    for task in sorted(by_task):
+        pool = sorted(by_task[task], key=lambda i: i.slug)
+        take = min(per_task, len(pool))
+        chosen.extend(random.Random(f"{seed}:pilot:{task}").sample(pool, take))
+
+    return sorted(chosen, key=lambda i: i.slug)[:n]
+
+
 def cmd_pilot(args: argparse.Namespace) -> int:
     """Measure whether the gradable slice actually discriminates between rungs."""
     config = load_model_config(args.config)
-    items = [i for i in load_corpus(args.corpus) if i.verifiable][: args.n]
+    items = _pilot_sample(load_corpus(args.corpus), args.n, args.seed)
     models = _models(args, ["openai/gpt-oss-20b", "claude-haiku-4-5", "claude-opus-5"])
 
     projection = project_run(items, models, config)
@@ -227,6 +258,7 @@ def cmd_pilot(args: argparse.Namespace) -> int:
             Budget(cap_usd=args.cap),
             max_output_tokens=args.max_tokens,
             concurrency=args.concurrency,
+            rate_limiter=RateLimiter(rpm=args.rpm) if args.rpm > 0 else NullRateLimiter(),
         )
 
     results = [
@@ -270,6 +302,15 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--seed", type=int, default=20260914)
         sp.add_argument("--replicates", type=int, default=3)
         sp.add_argument("--replicate-subset", type=int, default=200)
+        sp.add_argument(
+            "--rpm",
+            type=int,
+            default=0,
+            help=(
+                "cap outgoing requests per minute to the provider's published limit "
+                "(Groq's free plan is 30). 0 disables pacing."
+            ),
+        )
 
     corpus = sub.add_parser("corpus").add_subparsers(dest="sub", required=True)
     cb = corpus.add_parser("build")

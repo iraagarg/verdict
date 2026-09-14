@@ -31,6 +31,7 @@ from evald.models_config import ModelConfig
 from evald.replay.budget import Budget, BudgetExceededError
 from evald.replay.cache import ResponseCache, cache_key
 from evald.replay.client import GatewayError, Generation
+from evald.replay.ratelimit import NullRateLimiter, RateLimiter
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,10 +140,18 @@ def run_replay(
     max_output_tokens: int = 1024,
     concurrency: int = 8,
     max_attempts: int = 3,
+    rate_limiter: RateLimiter | NullRateLimiter | None = None,
 ) -> RunStats:
-    """Execute `tasks`, returning stats. Aborts hard when the budget is reached."""
+    """Execute `tasks`, returning stats. Aborts hard when the budget is reached.
+
+    `rate_limiter` paces outgoing calls to a provider's published limit. Without
+    it the runner discovers the limit by being throttled, which wastes round
+    trips and — on a free tier where the limit is low — turns most of the run
+    into retries.
+    """
     stats = RunStats()
     stop = threading.Event()
+    limiter = rate_limiter or NullRateLimiter()
 
     def execute(task: Task) -> Outcome | None:
         if stop.is_set():
@@ -184,6 +193,7 @@ def run_replay(
                 budget.release(reservation)
                 return None
             try:
+                limiter.acquire()  # pace to the provider's published limit
                 gen = complete(task.model, task.item.messages, params)
             except GatewayError as err:
                 last_error = err

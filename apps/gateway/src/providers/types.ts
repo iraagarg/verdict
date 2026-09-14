@@ -69,6 +69,16 @@ export interface ProviderFailure {
     "provider_5xx" | "rate_limited" | "timeout" | "auth" | "bad_request" | "connection" | "unknown";
   status: number | undefined;
   retryable: boolean;
+  /**
+   * Whether this failure is evidence the provider is UNHEALTHY.
+   *
+   * A circuit breaker exists to stop calling a broken service. HTTP 429 does
+   * not mean broken — it means healthy and asking you to slow down. Counting
+   * back-pressure as failure conflates "the provider is down" with "you are
+   * going too fast", and the correct responses to those are opposite: one is
+   * stop, the other is pace yourself.
+   */
+  countsTowardBreaker: boolean;
   retryAfterMs: number | undefined;
   message: string;
 }

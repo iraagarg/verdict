@@ -389,3 +389,76 @@ class TestProjection:
         short = make_item()
         long_item = short.model_copy(update={"messages": [{"role": "user", "content": "x" * 4000}]})
         assert estimate_input_tokens(long_item) > estimate_input_tokens(short)
+
+
+class TestRateLimiter:
+    """Pacing to a published limit beats discovering it by being throttled."""
+
+    def test_allows_an_initial_burst(self) -> None:
+        from evald.replay.ratelimit import RateLimiter
+
+        limiter = RateLimiter(rpm=60, burst=5)
+        for _ in range(5):
+            assert limiter.try_acquire(now=0.0) == 0.0
+
+    def test_blocks_once_the_burst_is_spent(self) -> None:
+        from evald.replay.ratelimit import RateLimiter
+
+        limiter = RateLimiter(rpm=60, burst=2)
+        limiter.try_acquire(now=0.0)
+        limiter.try_acquire(now=0.0)
+        assert limiter.try_acquire(now=0.0) > 0.0
+
+    def test_refills_over_time(self) -> None:
+        from evald.replay.ratelimit import RateLimiter
+
+        limiter = RateLimiter(rpm=60, burst=1)  # one per second
+        assert limiter.try_acquire(now=0.0) == 0.0
+        assert limiter.try_acquire(now=0.0) > 0.0
+        assert limiter.try_acquire(now=10.0) == 0.0
+
+    def test_never_refills_past_the_burst_ceiling(self) -> None:
+        from evald.replay.ratelimit import RateLimiter
+
+        limiter = RateLimiter(rpm=60, burst=3)
+        limiter.try_acquire(now=0.0)
+        # An hour of idling must not bank an hour's worth of requests.
+        for _ in range(3):
+            assert limiter.try_acquire(now=3600.0) == 0.0
+        assert limiter.try_acquire(now=3600.0) > 0.0
+
+    def test_wait_time_reflects_the_configured_rate(self) -> None:
+        from evald.replay.ratelimit import RateLimiter
+
+        limiter = RateLimiter(rpm=30, burst=1)  # one every two seconds
+        limiter.try_acquire(now=0.0)
+        assert limiter.try_acquire(now=0.0) == pytest.approx(2.0, abs=0.01)
+
+    def test_rejects_a_nonsense_rate(self) -> None:
+        from evald.replay.ratelimit import RateLimiter
+
+        with pytest.raises(ValueError):
+            RateLimiter(rpm=0)
+
+    def test_null_limiter_never_waits(self) -> None:
+        from evald.replay.ratelimit import NullRateLimiter
+
+        limiter = NullRateLimiter()
+        assert limiter.try_acquire() == 0.0
+        limiter.acquire()
+
+    def test_runner_paces_through_the_limiter(self, tmp_path: Path) -> None:
+        from evald.replay.ratelimit import RateLimiter
+
+        items = [make_item(f"math_word_problem-{i:04d}") for i in range(6)]
+        limiter = RateLimiter(rpm=6000, burst=2)
+        stats = run_replay(
+            build_tasks(items, ["claude-haiku-4-5"]),
+            CFG,
+            ResponseCache(tmp_path),
+            fake_complete(),
+            Budget(10.0),
+            concurrency=4,
+            rate_limiter=limiter,
+        )
+        assert len(stats.outcomes) == 6

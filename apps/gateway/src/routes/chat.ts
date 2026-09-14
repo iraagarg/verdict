@@ -284,7 +284,12 @@ export function registerChatRoutes(app: GatewayApp, services: GatewayServices): 
           clearTimeout(ttftTimer);
         }
       } catch (err) {
-        resolved.breaker.onFailure();
+        // Only failures that indicate an unhealthy provider count. A 429 is
+        // back-pressure: retrying with backoff is right, opening the breaker
+        // and refusing everything for the cooldown is not.
+        if (!(err instanceof ProviderError) || err.failure.countsTowardBreaker) {
+          resolved.breaker.onFailure();
+        }
         throw err;
       }
     };

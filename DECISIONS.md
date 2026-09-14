@@ -674,3 +674,76 @@ see exactly what the filtering is entitled to claim. A `drop_easy` filter remove
 problem but leaves the too-hard tail in place; re-running in `discriminative` mode once a strong rung
 is affordable is a strict improvement and is cheap, because the replay cache makes the already-piloted
 calls free.
+
+---
+
+## D-027 — Rate limits do not open the circuit breaker
+
+**Status:** ACCEPTED · **Date:** 2026-09-15 · **Phase:** P2 · **Amends:** D-013
+
+**Decision.** `ProviderFailure` carries an explicit `countsTowardBreaker` flag. HTTP 429 is
+`retryable: true, countsTowardBreaker: false`. 5xx, connection failures, timeouts and auth failures
+count; 400 does not.
+
+**What prompted it — the first real run.** The first pilot against a live provider (Groq's free plan,
+30 requests/minute) produced:
+
+| Outcome            | Count |
+| ------------------ | ----- |
+| 503 `breaker_open` | 339   |
+| 200 success        | 86    |
+| 429 `rate_limited` | 7     |
+
+Seven rate limits crossed the breaker's threshold of five. The breaker opened for its 30-second
+cooldown and refused the other 339 queued requests instantly. Over half the pilot was lost, and the
+resulting pass rates were computed on 44 of 100 items without anything marking them as degraded.
+
+**Rationale.** A circuit breaker exists to stop calling a provider that is **broken**. HTTP 429 means
+the provider is healthy and asking the client to slow down. Conflating the two is a category error,
+and the correct responses are opposite: one is _stop calling_, the other is _pace yourself_. Counting
+back-pressure as ill health converts a throughput problem into an outage.
+
+Auth failures do still count: a bad key fails every request until a human intervenes, so failing fast
+is right. A 400 does not: it is our bug, and says nothing about provider health.
+
+**Consequence.** A provider that throttles everything will now be retried with backoff indefinitely
+rather than short-circuited. That is the correct behaviour, but it makes client-side pacing necessary
+rather than optional — hence D-028.
+
+---
+
+## D-028 — The replay runner paces itself to a published rate limit
+
+**Status:** ACCEPTED · **Date:** 2026-09-15 · **Phase:** P2 · **Affects:** P3
+
+**Decision.** A thread-safe token bucket (`--rpm`) throttles outgoing calls to the provider's
+published limit. `--rpm 0` disables it.
+
+**Rationale.** Retrying a 429 is correct but wasteful: every one is a round trip that buys nothing
+and, on a free tier where the limit is low, most of the run becomes retries. Knowing the published
+limit and staying under it is strictly better. A token bucket rather than a fixed delay, because
+bursts are fine as long as the average holds — which is exactly how published RPM limits are defined.
+
+**Consequence.** `--rpm` must be set per provider, and it is a property of the account tier rather
+than of the model, so it belongs on the command line rather than in `config/models.yaml`.
+
+---
+
+## D-029 — The difficulty pilot samples the gradable slice stratified, not head-first
+
+**Status:** ACCEPTED · **Date:** 2026-09-15 · **Phase:** P2 · **Amends:** D-022
+
+**Decision.** `_pilot_sample` takes a seeded, balanced sample across every gradable task type.
+
+**What prompted it.** The first pilot took the first N verifiable items. Slugs sort alphabetically,
+`math_word_problem` precedes `multiple_choice`, and the corpus holds 600 of each — so a 100-item
+pilot tested **only GSM8K**. MMLU-Pro, the half chosen specifically because it resists ceiling
+effects (D-022), was never measured, and its pass rates would have been silently attributed to the
+whole gradable slice.
+
+**Rationale.** A pilot that measures one task type and reports a number for two is not a measurement
+error, it is a mislabelled result — the kind that survives into a README and then into an interview.
+
+**Consequence.** Per-task pass rates should be reported separately in the pilot artifact, since the
+two sources were chosen for different reasons and there is no reason to expect the same ceiling
+behaviour from both.

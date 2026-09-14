@@ -103,3 +103,44 @@ class TestCommittedCorpus:
     def test_slugs_are_unique(self) -> None:
         slugs = [i.slug for i in load_corpus(CORPUS)]
         assert len(set(slugs)) == len(slugs)
+
+
+class TestPilotSample:
+    """A pilot that silently tests only one task type would mislabel its results."""
+
+    def test_covers_every_gradable_task_type(self) -> None:
+        from evald.cli import _pilot_sample
+
+        items = load_corpus(CORPUS)
+        sample = _pilot_sample(items, n=100, seed=1)
+        tasks = {i.task_type for i in sample}
+        # Slugs sort alphabetically, so a naive [:100] would be all maths.
+        assert tasks == {"math_word_problem", "multiple_choice"}
+
+    def test_is_balanced_across_task_types(self) -> None:
+        from evald.cli import _pilot_sample
+
+        sample = _pilot_sample(load_corpus(CORPUS), n=100, seed=1)
+        counts = [
+            sum(1 for i in sample if i.task_type == t)
+            for t in sorted({i.task_type for i in sample})
+        ]
+        assert max(counts) - min(counts) <= 1
+
+    def test_never_includes_a_free_form_item(self) -> None:
+        from evald.cli import _pilot_sample
+
+        assert all(i.verifiable for i in _pilot_sample(load_corpus(CORPUS), n=50, seed=1))
+
+    def test_is_deterministic(self) -> None:
+        from evald.cli import _pilot_sample
+
+        items = load_corpus(CORPUS)
+        assert [i.slug for i in _pilot_sample(items, 60, seed=3)] == [
+            i.slug for i in _pilot_sample(items, 60, seed=3)
+        ]
+
+    def test_respects_the_requested_size(self) -> None:
+        from evald.cli import _pilot_sample
+
+        assert len(_pilot_sample(load_corpus(CORPUS), n=40, seed=1)) <= 40

@@ -1,0 +1,15 @@
+{
+  "filter_mode": "drop_easy",
+  "gradable_before": 1200,
+  "gradable_discriminative": 15,
+  "gradable_piloted": 44,
+  "pass_rate_by_model": {
+    "openai/gpt-oss-120b": 0.7381,
+    "openai/gpt-oss-20b": 0.75
+  },
+  "pilot_models": [
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b"
+  ],
+  "removed_as_uninformative": 29
+}

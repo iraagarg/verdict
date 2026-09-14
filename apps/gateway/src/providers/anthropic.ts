@@ -45,6 +45,8 @@ export function classifyAnthropicError(err: unknown): ProviderFailure {
       kind: "timeout",
       status: undefined,
       retryable: true,
+
+      countsTowardBreaker: true,
       retryAfterMs: undefined,
       message: err.message,
     };
@@ -54,6 +56,8 @@ export function classifyAnthropicError(err: unknown): ProviderFailure {
       kind: "connection",
       status: undefined,
       retryable: true,
+
+      countsTowardBreaker: true,
       retryAfterMs: undefined,
       message: err.message,
     };
@@ -65,6 +69,8 @@ export function classifyAnthropicError(err: unknown): ProviderFailure {
       kind: "rate_limited",
       status: 429,
       retryable: true,
+      // Back-pressure, not ill health. Must not open the breaker.
+      countsTowardBreaker: false,
       retryAfterMs: Number.isFinite(seconds) ? seconds * 1000 : undefined,
       message: err.message,
     };
@@ -77,6 +83,8 @@ export function classifyAnthropicError(err: unknown): ProviderFailure {
       kind: "auth",
       status: err.status,
       retryable: false,
+
+      countsTowardBreaker: true,
       retryAfterMs: undefined,
       message: err.message,
     };
@@ -88,6 +96,8 @@ export function classifyAnthropicError(err: unknown): ProviderFailure {
       kind: is5xx ? "provider_5xx" : "bad_request",
       status: err.status,
       retryable: is5xx,
+      // A 400 is our bug, not the provider's; it says nothing about health.
+      countsTowardBreaker: is5xx,
       retryAfterMs: undefined,
       message: err.message,
     };
@@ -96,6 +106,7 @@ export function classifyAnthropicError(err: unknown): ProviderFailure {
     kind: "unknown",
     status: undefined,
     retryable: false,
+    countsTowardBreaker: true,
     retryAfterMs: undefined,
     message: err instanceof Error ? err.message : String(err),
   };
