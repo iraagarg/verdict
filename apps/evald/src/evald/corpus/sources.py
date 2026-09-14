@@ -14,6 +14,11 @@ import re
 from collections.abc import Iterator
 from dataclasses import dataclass
 
+MATH_INSTRUCTION = (
+    "Solve the problem. Show your reasoning, then give the final numeric answer "
+    "on its own last line in the form: #### <answer>"
+)
+
 GSM8K_INSTRUCTION = (
     "Solve the problem. Show your reasoning, then give the final numeric answer "
     "on its own last line in the form: #### <answer>"
@@ -54,6 +59,7 @@ class RawItem:
 #: Dataset licences, recorded per item. Verified from each dataset's HF card.
 LICENSES = {
     "openai/gsm8k": "MIT",
+    "nlile/hendrycks-MATH-benchmark": "MIT",
     "TIGER-Lab/MMLU-Pro": "MIT",
     "abisee/cnn_dailymail": "Apache-2.0",
     "databricks/databricks-dolly-15k": "CC-BY-SA-3.0",
@@ -113,6 +119,58 @@ def gsm8k(limit: int) -> list[RawItem]:
             )
         )
     return _dedupe(out)
+
+
+#: Hendrycks MATH answers are LaTeX. Only problems whose answer is a plain
+#: number are usable, because the existing `final_number` verifier compares
+#: numbers and a LaTeX-aware comparator is a research project of its own.
+_PLAIN_NUMBER = re.compile(r"^-?\d[\d,]*(?:\.\d+)?$")
+
+#: Levels 3-5 only. The pilot measured gpt-oss-120b at 98% on GSM8K — a ceiling
+#: that made half the gradable slice worthless — so difficulty is now a source
+#: filter, not something discovered afterwards. DECISIONS.md D-030.
+MATH_MIN_LEVEL = 3
+
+
+def hendrycks_math(limit: int) -> list[RawItem]:
+    """Competition maths, restricted to hard levels with machine-checkable answers."""
+    out: list[RawItem] = []
+    # Both splits: the level>=3 AND plain-numeric-answer filter is strict enough
+    # that one split does not yield 600 items. There is no train/test leakage
+    # concern here because nothing is being trained — the split is just how the
+    # upstream dataset is packaged.
+    rows = [
+        *_load("nlile/hendrycks-MATH-benchmark", None, "test", 6000),
+        *_load("nlile/hendrycks-MATH-benchmark", None, "train", 9000),
+    ]
+    for row in rows:
+        try:
+            level = int(str(row["level"]))
+        except (TypeError, ValueError):
+            continue
+        if level < MATH_MIN_LEVEL:
+            continue
+
+        answer = str(row["answer"]).strip().replace("\\!", "").replace("\\,", "")
+        if not _PLAIN_NUMBER.match(answer):
+            continue  # LaTeX answer we cannot verify exactly; skip rather than guess
+
+        out.append(
+            RawItem(
+                source_dataset="nlile/hendrycks-MATH-benchmark",
+                source_id=str(row["unique_id"]),
+                source_license=LICENSES["nlile/hendrycks-MATH-benchmark"],
+                task_type="math_word_problem",
+                messages=[
+                    {"role": "system", "content": MATH_INSTRUCTION},
+                    {"role": "user", "content": str(row["problem"])},
+                ],
+                ground_truth=answer.replace(",", ""),
+            )
+        )
+        if len(out) >= limit:
+            break
+    return _dedupe(out)[:limit]
 
 
 def mmlu_pro(limit: int) -> list[RawItem]:

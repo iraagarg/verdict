@@ -67,7 +67,7 @@ def write_corpus(items: list[CorpusItem], path: Path) -> None:
 def cmd_corpus_build(args: argparse.Namespace) -> int:
     print("loading source datasets (this downloads from HuggingFace)...", file=sys.stderr)
     raw = {
-        "math_word_problem": sources.gsm8k(args.targets["math_word_problem"] * 2),
+        "math_word_problem": sources.hendrycks_math(args.targets["math_word_problem"]),
         "multiple_choice": sources.mmlu_pro(args.targets["multiple_choice"] * 2),
         "summarization": sources.cnn_summarization(args.targets["summarization"] * 6),
         "long_form_qa": sources.dolly_long_form_qa(args.targets["long_form_qa"]),
@@ -262,7 +262,12 @@ def cmd_pilot(args: argparse.Namespace) -> int:
         )
 
     results = [
-        PilotResult(slug=o.task.item.slug, model=o.task.model, passed=bool(o.verifier_pass))
+        PilotResult(
+            slug=o.task.item.slug,
+            model=o.task.model,
+            passed=bool(o.verifier_pass),
+            task_type=o.task.item.task_type,
+        )
         for o in stats.outcomes
         if o.error_kind is None and o.verifier_pass is not None
     ]

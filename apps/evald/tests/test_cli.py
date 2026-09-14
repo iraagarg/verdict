@@ -88,6 +88,25 @@ class TestCommittedCorpus:
         for i in load_corpus(CORPUS):
             assert i.source_dataset and i.source_id and i.source_license
 
+    def test_maths_comes_from_the_hard_source_not_gsm8k(self) -> None:
+        # The pilot measured gpt-oss-120b at 98% on GSM8K: a ceiling that made
+        # half the gradable slice worthless. D-030 replaced it.
+        sources = {
+            i.source_dataset for i in load_corpus(CORPUS) if i.task_type == "math_word_problem"
+        }
+        assert sources == {"nlile/hendrycks-MATH-benchmark"}
+        assert "openai/gsm8k" not in {i.source_dataset for i in load_corpus(CORPUS)}
+
+    def test_every_maths_answer_is_a_plain_number(self) -> None:
+        # The final_number verifier compares numbers. A LaTeX ground truth would
+        # fail every correct answer, which would look like a weak model.
+        import re
+
+        for i in load_corpus(CORPUS):
+            if i.task_type == "math_word_problem":
+                assert i.ground_truth is not None
+                assert re.fullmatch(r"-?\d+(?:\.\d+)?", i.ground_truth), i.ground_truth
+
     def test_every_gradable_item_has_a_working_verifier(self) -> None:
         from evald.corpus.verifiers import REGISTRY
 

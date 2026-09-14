@@ -1,0 +1,34 @@
+{
+  "discriminative_by_task": {
+    "math_word_problem": 40,
+    "multiple_choice": 32
+  },
+  "filter_mode": "drop_easy",
+  "gradable_before": 1200,
+  "gradable_discriminative": 72,
+  "gradable_piloted": 100,
+  "item_outcomes": {
+    "all_models_failed": 53,
+    "all_models_passed": 28,
+    "models_disagreed": 19
+  },
+  "pass_rate_by_model": {
+    "openai/gpt-oss-120b": 0.42,
+    "openai/gpt-oss-20b": 0.33
+  },
+  "pass_rate_by_model_and_task": {
+    "openai/gpt-oss-120b|math_word_problem": 0.3,
+    "openai/gpt-oss-120b|multiple_choice": 0.54,
+    "openai/gpt-oss-20b|math_word_problem": 0.28,
+    "openai/gpt-oss-20b|multiple_choice": 0.38
+  },
+  "pilot_models": [
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b"
+  ],
+  "piloted_by_task": {
+    "math_word_problem": 50,
+    "multiple_choice": 50
+  },
+  "removed_as_uninformative": 28
+}

@@ -747,3 +747,48 @@ error, it is a mislabelled result — the kind that survives into a README and t
 **Consequence.** Per-task pass rates should be reported separately in the pilot artifact, since the
 two sources were chosen for different reasons and there is no reason to expect the same ceiling
 behaviour from both.
+
+---
+
+## D-030 — GSM8K replaced with hard MATH, on measured evidence
+
+**Status:** ACCEPTED · **Date:** 2026-09-15 · **Phase:** P2 · **Supersedes part of D-022**
+
+**Decision.** The maths half of the gradable slice is `nlile/hendrycks-MATH-benchmark`, restricted to
+difficulty **levels 3–5** and to problems whose answer is a **plain number** (so the existing
+`final_number` verifier works unchanged). GSM8K is removed from the corpus entirely.
+
+**The measurement that forced it.** The first clean pilot, on two free Groq models:
+
+| Source   | gpt-oss-20b | gpt-oss-120b | Discriminative items |
+| -------- | ----------- | ------------ | -------------------- |
+| GSM8K    | 90%         | **98%**      | **5 / 50**           |
+| MMLU-Pro | 38%         | 54%          | 32 / 50              |
+
+A 120B open model scoring 98% means every paid rung scores 98–100%. Those 600 items could not
+separate a cheap rung from an expensive one, gave the judge almost no losses to be validated
+against, and would still have cost money to replay across seven models.
+
+Critically, the **aggregate** pass rate was 0.76 / 0.64 — healthy-looking, and completely hiding the
+split. Only the per-task breakdown (D-029) revealed it.
+
+**After the swap, same pilot protocol:**
+
+| Source          | gpt-oss-20b | gpt-oss-120b | Discriminative items |
+| --------------- | ----------- | ------------ | -------------------- |
+| MATH levels 3–5 | 28%         | 30%          | **40 / 50**          |
+| MMLU-Pro        | 38%         | 54%          | 32 / 50              |
+
+**Alternatives rejected.** _More MMLU-Pro_ — proven to work and free to adopt, but collapses the
+gradable slice to a single task shape, and multiple-choice is not representative of real LLM
+traffic. _AIME_ — integer answers and no ceiling risk, but likely too hard in the other direction.
+_Drop maths entirely_ — gives up power on the slice that costs almost nothing to scale.
+
+**Consequence, and the remaining open question.** The numeric-answer filter is strict: only ~~600
+usable items exist across both MATH splits, so the maths slice is now exactly 600 with no spare
+capacity. More importantly, **31 of 50 piloted maths items were failed by BOTH cheap models.** That
+is the right shape for a cheap-versus-strong routing decision, but it means the ceiling risk has been
+traded for a floor risk: if the strong rungs also fail them, the slice discriminates nothing again.
+Resolving that needs a strong model in the pilot, which needs real spend (~~$1). Until that runs, the
+maths slice is **verified not-too-easy but not yet verified not-too-hard**, and no claim should be
+made about it.

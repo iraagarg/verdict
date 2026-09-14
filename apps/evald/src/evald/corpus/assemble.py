@@ -41,6 +41,10 @@ class PilotResult:
     slug: str
     model: str
     passed: bool
+    #: Which source this item came from. An aggregate pass rate over two very
+    #: different sources can hide that one of them is at ceiling and the other
+    #: is not — which is the single thing the pilot exists to detect.
+    task_type: str = "unknown"
 
 
 def assign_splits(
@@ -211,8 +215,29 @@ def filter_by_difficulty(
             kept.append(item)
 
     by_model: dict[str, list[bool]] = defaultdict(list)
+    by_model_task: dict[tuple[str, str], list[bool]] = defaultdict(list)
     for r in results:
         by_model[r.model].append(r.passed)
+        by_model_task[(r.model, r.task_type)].append(r.passed)
+
+    # How the piloted items actually split. An aggregate "discriminative count"
+    # says nothing about WHY items were dropped; these three numbers do.
+    outcomes_by_slug: dict[str, list[bool]] = defaultdict(list)
+    task_of: dict[str, str] = {}
+    for r in results:
+        outcomes_by_slug[r.slug].append(r.passed)
+        task_of[r.slug] = r.task_type
+
+    both_pass = sum(1 for v in outcomes_by_slug.values() if all(v))
+    both_fail = sum(1 for v in outcomes_by_slug.values() if not any(v))
+    disagree = len(outcomes_by_slug) - both_pass - both_fail
+
+    kept_by_task: dict[str, int] = defaultdict(int)
+    piloted_by_task: dict[str, int] = defaultdict(int)
+    for slug, task in task_of.items():
+        piloted_by_task[task] += 1
+        if slug in keep:
+            kept_by_task[task] += 1
 
     report: dict[str, object] = {
         "filter_mode": mode,
@@ -223,6 +248,17 @@ def filter_by_difficulty(
         "removed_as_uninformative": len(piloted) - len(keep),
         "pass_rate_by_model": {
             model: round(sum(v) / len(v), 4) for model, v in sorted(by_model.items())
+        },
+        "pass_rate_by_model_and_task": {
+            f"{model}|{task}": round(sum(v) / len(v), 4)
+            for (model, task), v in sorted(by_model_task.items())
+        },
+        "piloted_by_task": dict(sorted(piloted_by_task.items())),
+        "discriminative_by_task": dict(sorted(kept_by_task.items())),
+        "item_outcomes": {
+            "all_models_passed": both_pass,
+            "models_disagreed": disagree,
+            "all_models_failed": both_fail,
         },
     }
     return kept, report
