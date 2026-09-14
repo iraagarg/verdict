@@ -234,7 +234,7 @@ def cmd_pilot(args: argparse.Namespace) -> int:
         for o in stats.outcomes
         if o.error_kind is None and o.verifier_pass is not None
     ]
-    kept, report = filter_by_difficulty(load_corpus(args.corpus), results)
+    kept, report = filter_by_difficulty(load_corpus(args.corpus), results, mode=args.mode)
 
     Path(args.artifacts).mkdir(parents=True, exist_ok=True)
     report_path = Path(args.artifacts) / "difficulty-pilot.json"
@@ -291,6 +291,17 @@ def build_parser() -> argparse.ArgumentParser:
     common(pilot)
     pilot.add_argument("-n", type=int, default=200)
     pilot.add_argument("--apply", action="store_true")
+    pilot.add_argument(
+        "--mode",
+        choices=["discriminative", "drop_easy"],
+        default="discriminative",
+        help=(
+            "discriminative: keep items with at least one pass AND one fail "
+            "(needs a cheap/mid/strong pilot). drop_easy: keep everything except "
+            "items every pilot model got right (correct when the pilot was "
+            "cheap models only)."
+        ),
+    )
     pilot.set_defaults(func=cmd_pilot)
 
     return p

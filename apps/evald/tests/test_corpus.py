@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 import pytest
 
 from evald.corpus.assemble import (
+    FilterMode,
     PilotResult,
     assign_splits,
     build_corpus,
@@ -228,5 +231,50 @@ class TestDifficultyFilter:
         kept, report = filter_by_difficulty(items, results)
         assert [i.slug for i in kept] == [slugs[1]]
         assert report["gradable_before"] == 4
-        assert report["removed_all_pass_or_all_fail"] == 3
+        assert report["removed_as_uninformative"] == 3
         assert report["pass_rate_by_model"] == {"cheap": 0.5, "strong": 0.75}
+
+
+class TestCheapOnlyPilotMode:
+    """A pilot run on cheap models only can claim less, and must filter less."""
+
+    RESULTS: ClassVar[list[PilotResult]] = [
+        PilotResult("easy", "20b", True),
+        PilotResult("easy", "120b", True),
+        PilotResult("split", "20b", False),
+        PilotResult("split", "120b", True),
+        PilotResult("hard", "20b", False),
+        PilotResult("hard", "120b", False),
+    ]
+
+    def test_discriminative_mode_drops_items_nobody_passed(self) -> None:
+        assert discriminative_slugs(self.RESULTS) == {"split"}
+
+    def test_drop_easy_mode_keeps_them(self) -> None:
+        # Two small models both failing says nothing about whether a frontier
+        # model would succeed — and that is exactly where cheap-vs-strong
+        # routing gets decided. Discarding those items would throw away the
+        # most informative part of the corpus.
+        assert discriminative_slugs(self.RESULTS, mode="drop_easy") == {"split", "hard"}
+
+    def test_both_modes_always_drop_the_too_easy_items(self) -> None:
+        # The one-sided claim that holds whatever models were in the pilot.
+        modes: list[FilterMode] = ["discriminative", "drop_easy"]
+        for mode in modes:
+            assert "easy" not in discriminative_slugs(self.RESULTS, mode=mode)
+
+    def test_report_records_which_models_and_mode_produced_it(self) -> None:
+        items = build_corpus(POOL, {"math_word_problem": 3}, seed=1)
+        slugs = [i.slug for i in items]
+        results = [
+            PilotResult(slugs[0], "openai/gpt-oss-20b", True),
+            PilotResult(slugs[0], "openai/gpt-oss-120b", True),
+            PilotResult(slugs[1], "openai/gpt-oss-20b", False),
+            PilotResult(slugs[1], "openai/gpt-oss-120b", False),
+            PilotResult(slugs[2], "openai/gpt-oss-20b", False),
+            PilotResult(slugs[2], "openai/gpt-oss-120b", True),
+        ]
+        kept, report = filter_by_difficulty(items, results, mode="drop_easy")
+        assert report["filter_mode"] == "drop_easy"
+        assert report["pilot_models"] == ["openai/gpt-oss-120b", "openai/gpt-oss-20b"]
+        assert {i.slug for i in kept} == {slugs[1], slugs[2]}

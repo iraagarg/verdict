@@ -642,3 +642,35 @@ interval built on them, which is precisely the error P4 exists to avoid making.
 
 **Consequence.** Source loaders scan a wider window than they need (up to 60x the target for Bitext)
 because deduplication removes a large fraction of candidates.
+
+---
+
+## D-026 — The difficulty filter has two modes, because a cheap-only pilot can claim less
+
+**Status:** ACCEPTED · **Date:** 2026-09-14 · **Phase:** P2 · **Amends:** D-022
+
+**Decision.** `filter_by_difficulty` takes a `mode`:
+
+- `discriminative` (default) — keep items with at least one pass **and** at least one fail. Correct
+  only when the pilot spanned a real capability range (cheap, mid and strong).
+- `drop_easy` — keep everything except items **every** pilot model got right. Correct when the pilot
+  used cheap models only.
+
+**Rationale.** The contamination risk D-022 addresses is one-sided, and the filter should be too.
+An item every model answers correctly is provably uninformative no matter which models were in the
+pilot — it cannot separate a cheap rung from an expensive one and gives the judge no loss to be
+validated against. But an item every model gets **wrong** is only uninformative if the strongest rung
+was present. Two small open models both failing says nothing about whether a frontier model would
+succeed, and those are precisely the items where cheap-versus-strong routing is decided. Dropping
+them on a cheap-only pilot would discard the most informative part of the corpus.
+
+**What prompted it.** Running the pilot on Groq's free plan (`openai/gpt-oss-20b` and
+`openai/gpt-oss-120b`, no payment) is a way to validate the entire live pipeline before spending
+anything. That pilot is real and useful, but it cannot support the `discriminative` claim, and
+silently applying the stricter filter to it would have quietly mis-filtered the corpus.
+
+**Consequence.** The pilot report records `filter_mode` and `pilot_models`, so any later reader can
+see exactly what the filtering is entitled to claim. A `drop_easy` filter removes the ceiling-effect
+problem but leaves the too-hard tail in place; re-running in `discriminative` mode once a strong rung
+is affordable is a strict improvement and is cheap, because the replay cache makes the already-piloted
+calls free.

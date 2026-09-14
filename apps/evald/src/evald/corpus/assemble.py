@@ -22,6 +22,7 @@ from __future__ import annotations
 import random
 from collections import defaultdict
 from dataclasses import dataclass
+from typing import Literal
 
 from evald.corpus.schema import CorpusItem, Split
 from evald.corpus.sources import RawItem
@@ -141,30 +142,56 @@ def hash_seed(seed: int, label: str) -> int:
     return int.from_bytes(digest[:8], "big")
 
 
-def discriminative_slugs(results: list[PilotResult], min_models: int = 2) -> set[str]:
-    """Slugs where the rungs actually disagreed.
+#: How aggressively the pilot filters.
+#:
+#: "discriminative" keeps only items with at least one pass AND at least one
+#: fail. It is correct when the pilot spans a real capability range (a cheap,
+#: a mid and a strong rung), because then "everyone failed" really does mean
+#: the item is beyond the whole ladder.
+#:
+#: "drop_easy" keeps everything except items every pilot model got right. Use
+#: it when the pilot only had CHEAP models. Two small models both failing says
+#: nothing about whether a frontier model would succeed — and those are exactly
+#: the items where cheap-vs-strong routing is decided. Discarding them would
+#: throw away the most informative part of the corpus.
+FilterMode = Literal["discriminative", "drop_easy"]
 
-    An item every model gets right (or every model gets wrong) contributes
-    nothing: it cannot separate a cheap rung from an expensive one, and it gives
-    the judge no loss to be validated against. Keeping only items with at least
-    one pass AND at least one fail targets the band where quality differences
-    are visible.
+
+def discriminative_slugs(
+    results: list[PilotResult],
+    min_models: int = 2,
+    mode: FilterMode = "discriminative",
+) -> set[str]:
+    """Slugs worth keeping, given what the pilot measured.
+
+    The contamination risk this addresses is one-sided: an item every model gets
+    right is provably uninformative, whatever models were in the pilot. An item
+    every model gets wrong is only uninformative if the pilot included the
+    strongest rung. `mode` is how the caller states which of those they can
+    actually claim.
     """
     by_slug: dict[str, list[bool]] = defaultdict(list)
     for r in results:
         by_slug[r.slug].append(r.passed)
 
-    return {
-        slug
-        for slug, outcomes in by_slug.items()
-        if len(outcomes) >= min_models and any(outcomes) and not all(outcomes)
-    }
+    keep: set[str] = set()
+    for slug, outcomes in by_slug.items():
+        if len(outcomes) < min_models:
+            continue
+        if all(outcomes):
+            continue  # too easy for every pilot model — uninformative either way
+        if mode == "drop_easy":
+            keep.add(slug)
+        elif any(outcomes):
+            keep.add(slug)
+    return keep
 
 
 def filter_by_difficulty(
     items: list[CorpusItem],
     results: list[PilotResult],
     min_models: int = 2,
+    mode: FilterMode = "discriminative",
 ) -> tuple[list[CorpusItem], dict[str, object]]:
     """Keep discriminative gradable items; free-form items pass through untouched.
 
@@ -172,7 +199,7 @@ def filter_by_difficulty(
     the corpus so the ceiling-effect claim is a measured number, not an
     assertion.
     """
-    keep = discriminative_slugs(results, min_models=min_models)
+    keep = discriminative_slugs(results, min_models=min_models, mode=mode)
     graded = [it for it in items if it.verifiable]
     piloted = {r.slug for r in results}
 
@@ -188,10 +215,12 @@ def filter_by_difficulty(
         by_model[r.model].append(r.passed)
 
     report: dict[str, object] = {
+        "filter_mode": mode,
+        "pilot_models": sorted({r.model for r in results}),
         "gradable_before": len(graded),
         "gradable_piloted": len(piloted),
         "gradable_discriminative": len(keep),
-        "removed_all_pass_or_all_fail": len(piloted) - len(keep),
+        "removed_as_uninformative": len(piloted) - len(keep),
         "pass_rate_by_model": {
             model: round(sum(v) / len(v), 4) for model, v in sorted(by_model.items())
         },
