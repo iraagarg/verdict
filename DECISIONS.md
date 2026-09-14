@@ -792,3 +792,92 @@ traded for a floor risk: if the strong rungs also fail them, the slice discrimin
 Resolving that needs a strong model in the pilot, which needs real spend (~~$1). Until that runs, the
 maths slice is **verified not-too-easy but not yet verified not-too-hard**, and no claim should be
 made about it.
+
+---
+
+## D-031 — Judge design: Opus 5, shared rubric skeleton, prompt-validated JSON
+
+**Status:** ACCEPTED · **Date:** 2026-09-15 · **Phase:** P3 · **Implements:** D-003
+
+**Decision.** The judge is `claude-opus-5`. The rubric is one shared skeleton (verdict scale, tie
+rules, output contract) plus a per-task criteria block, under a single `RUBRIC_VERSION`. Verdicts are
+prompt-driven JSON validated strictly in code, with one retry, then `unparseable`.
+
+**Why Opus rather than something cheaper.** The reference outputs are Opus, so every comparison is
+"candidate vs Opus" — which makes the _direction_ of self-preference matter more than its size. An
+Opus judge biases candidates to look **worse**, i.e. toward keeping the expensive model. That is the
+conservative direction, and the same direction D-004's `ci.low >= F` rule deliberately errs in. A
+GPT-family judge would have been cheaper and family-neutral to the reference, but it shares a family
+with two _candidate_ rungs, so its bias would push toward **wrongly demoting** a route. Safe-direction
+bias beats no-direction bias.
+
+The other reason is economic in the currency that is actually scarce: a judge that fails the
+κ ≥ 0.6 gate costs a full re-label — hours of Iraa's time — not dollars.
+
+**Why not constrained decoding.** Structured output is not available uniformly across Anthropic,
+OpenAI and Groq, and the judge must behave identically across judge models or the calibration does
+not transfer. Prompt-driven JSON with strict validation is uniform, and DESIGN.md failure mode #11
+already specified the retry-then-exclude behaviour.
+
+**Why one rubric rather than three.** Three rubrics are three instruments and honestly need three
+calibrations — roughly three times the labelling. The shared skeleton keeps it one instrument with
+one set of labels, while per-task κ is still reported, which is where a weakness would surface.
+
+**Consequence.** `RUBRIC_VERSION` is load-bearing: any edit to the rubric text invalidates every
+label calibrated against it. The judge's token budget is capped at 700, because on adaptive-thinking
+models an uncapped budget turns a cheap classification into an expensive essay.
+
+---
+
+## D-032 — The κ gate is on the confidence interval's lower bound
+
+**Status:** ACCEPTED · **Date:** 2026-09-15 · **Phase:** P3 · **Affects:** P4, P5
+
+**Decision.** The judge passes only when the **lower bound** of the bootstrap CI on Cohen's κ is
+≥ 0.6, not when the point estimate is.
+
+**Rationale.** A κ of 0.62 with an interval from 0.45 to 0.78 has not demonstrated 0.6 — it is
+consistent with a judge substantially worse than the gate. This is the same rule as D-004's routing
+decision, applied to the instrument rather than to the models, and for the same reason: small samples
+should produce refusals, not optimistic verdicts.
+
+**Why κ rather than raw agreement.** Raw agreement is inflated by chance and by class imbalance. A
+judge that answers "tie" to everything scores 33% raw agreement on a balanced sample and is worthless;
+κ scores it 0. There is a test asserting exactly that.
+
+**Consequence.** With 200 labels the CI half-width is roughly ±0.10, so a point estimate below about
+0.70 will not clear the gate. If that happens the honest response is in the report: the diagnosis
+names the specific failure mode (tie-happy, over-deciding, position-dependent, directionally biased,
+concentrated in one task), the rubric is revised, `RUBRIC_VERSION` is bumped, and a **fresh** sample
+is labelled. Reusing the same labels against a revised rubric would overfit the rubric to them, and
+the resulting κ would be meaningless.
+
+---
+
+## D-033 — Human labels are blind, resumable, and record their own provenance
+
+**Status:** ACCEPTED · **Date:** 2026-09-15 · **Phase:** P3
+
+**Decision.** The labelling harness never shows model identity or the judge's verdict. Pairs are
+sampled stratified across (task type × candidate model) with the candidate's slot randomised per
+pair. Every label is appended to disk immediately and records the slot shown and the time taken.
+
+**Rationale.** Each property defends a specific way the κ could be meaningless:
+
+- **Blind to model** — otherwise the labels measure expectation ("the expensive one is probably
+  better") rather than quality.
+- **Blind to the judge** — otherwise the labels anchor on the judge and κ measures agreement with
+  itself.
+- **Stratified** — a κ computed on a sample dominated by one task or one model is a number about
+  that corner, not about the judge.
+- **Not sampled by judge uncertainty** — sampling the judge's hard cases would make κ a measure of
+  its worst performance and incomparable to anything.
+- **Slot randomised and recorded** — makes the _labeller's own_ position bias measurable instead of
+  baked in.
+- **Timing recorded** — a label made in two seconds is worth re-checking before blaming the judge
+  for disagreeing with it. The diagnosis flags this explicitly.
+- **Saved after every decision** — 200 labels is hours of work; losing it to a closed terminal is
+  not an acceptable failure mode.
+
+**Consequence.** `calibration/labels.jsonl` is committed. It is real measurement data and the human
+half of every κ this project reports.

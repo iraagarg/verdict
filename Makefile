@@ -1,4 +1,4 @@
-.PHONY: help install dev up down logs test lint typecheck fmt migrate corpus plan pilot bench clean
+.PHONY: help install dev up down logs test lint typecheck fmt migrate corpus plan pilot label calibrate bench clean
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -49,6 +49,12 @@ plan: ## Show the projected cost of a full replay. Spends nothing.
 pilot: ## Measure whether the gradable slice discriminates between rungs (needs a key)
 	cd apps/evald && .venv/bin/python -m evald.cli pilot --cap $(CAP) -n $(N)
 
+label: ## Hand-label sampled pairs for judge calibration (blind, resumable, free)
+	cd apps/evald && .venv/bin/python -m evald.cli label --pairs $(PAIRS)
+
+calibrate: ## Judge the labelled pairs and write calibration_report.json
+	cd apps/evald && .venv/bin/python -m evald.cli calibrate --pairs $(PAIRS) --judge-model $(JUDGE)
+
 bench: ## Run the full replay and write a versioned artifact. Re-runs are free.
 	@test -n "$(CAP)" || (echo "refusing to run without a spend cap: make bench CAP=30" && exit 1)
 	cd apps/evald && .venv/bin/python -m evald.cli replay run --cap $(CAP)
@@ -61,3 +67,5 @@ clean: ## Remove build outputs and virtualenvs
 # Default spend cap and pilot size. Override: make bench CAP=30
 CAP ?= 5
 N ?= 200
+PAIRS ?= 200
+JUDGE ?= claude-opus-5

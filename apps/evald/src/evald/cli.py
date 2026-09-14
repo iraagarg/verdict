@@ -17,12 +17,25 @@ import json
 import sys
 import uuid
 from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
+from evald.calibrate.labeler import load_labels, run_session, set_requests
+from evald.calibrate.runner import (
+    build_calibration_report,
+    check_ground_truth,
+    judge_pairs,
+    write_report,
+)
+from evald.calibrate.sample import build_pairs
 from evald.corpus import sources
 from evald.corpus.assemble import PilotResult, build_corpus, filter_by_difficulty
 from evald.corpus.schema import CorpusItem, corpus_sha256
-from evald.models_config import load_model_config
+from evald.judge.judge import PairwiseJudge
+from evald.judge.rubric import RUBRIC_VERSION
+from evald.judge.store import GenerationStore, MissingGenerationError
+from evald.models_config import ModelConfig, load_model_config
 from evald.replay.artifact import ModelSummary, RunArtifact, git_sha, now_iso, pricing_snapshot
 from evald.replay.budget import Budget
 from evald.replay.cache import ResponseCache, cache_key
@@ -34,6 +47,7 @@ from evald.replay.runner import build_tasks, request_params, run_replay, summari
 DEFAULT_CORPUS = Path("../../corpus/items.jsonl")
 DEFAULT_CACHE = Path("../../.cache/replay")
 DEFAULT_ARTIFACTS = Path("../../artifacts")
+DEFAULT_LABELS = Path("../../calibration/labels.jsonl")
 
 #: 1,200 gradable + 300 free-form. Only the free-form slice costs judge money in
 #: P3, so the volume lives where it is cheap (DECISIONS.md D-021).
@@ -46,7 +60,8 @@ DEFAULT_TARGETS = {
 }
 
 
-def load_corpus(path: Path) -> list[CorpusItem]:
+def load_corpus(path: str | Path) -> list[CorpusItem]:
+    path = Path(path)
     if not path.is_file():
         raise SystemExit(f"no corpus at {path}. Run `evald corpus build` first.")
     return [
@@ -287,6 +302,151 @@ def cmd_pilot(args: argparse.Namespace) -> int:
     return 0
 
 
+def _judge_complete(
+    client: GatewayClient,
+) -> Callable[[str, list[dict[str, str]], dict[str, Any]], str]:
+    """Adapt the gateway client to the judge's simpler text-in/text-out shape."""
+
+    def complete(model: str, messages: list[dict[str, str]], params: dict[str, Any]) -> str:
+        return client.complete(model, messages, params).text
+
+    return complete
+
+
+def _load_pairs(
+    args: argparse.Namespace, items: list[CorpusItem], config: ModelConfig
+) -> list[Any]:
+    candidates = [m for m in _models(args, config.by_cost()) if m != config.reference_model]
+    return build_pairs(
+        items,
+        candidate_models=candidates,
+        reference_model=config.reference_model,
+        n=args.pairs,
+        seed=args.seed,
+    )
+
+
+def cmd_label(args: argparse.Namespace) -> int:
+    """Interactive labelling. Blind, resumable, saves after every decision."""
+    config = load_model_config(args.config)
+    items = load_corpus(args.corpus)
+    by_slug = {i.slug: i for i in items}
+    pairs = _load_pairs(args, items, config)
+
+    store = GenerationStore(ResponseCache(args.cache), config, args.max_tokens)
+
+    texts: dict[str, tuple[str, str]] = {}
+    requests: dict[str, str] = {}
+    usable = []
+    for pair in pairs:
+        item = by_slug[pair.slug]
+        try:
+            candidate = store.get(item, pair.candidate_model)
+            reference = store.get(item, pair.reference_model)
+        except MissingGenerationError:
+            continue
+        texts[pair.pair_id] = (candidate.text, reference.text)
+        requests[pair.pair_id] = item.prompt_text()
+        usable.append(pair)
+
+    if not usable:
+        raise SystemExit(
+            "No cached generations to label. Run `evald replay run` for the reference model "
+            f"({config.reference_model}) and at least one candidate first."
+        )
+    if len(usable) < len(pairs):
+        print(
+            f"note: {len(pairs) - len(usable)} of {len(pairs)} pairs have no cached generation "
+            f"and were skipped. Replay more models to label the full sample.",
+            file=sys.stderr,
+        )
+
+    set_requests(requests)
+    run_session(usable, texts, Path(args.labels))
+    return 0
+
+
+def cmd_calibrate(args: argparse.Namespace) -> int:
+    """Judge the labelled pairs, compare against the human labels, write the report."""
+    config = load_model_config(args.config)
+    items = load_corpus(args.corpus)
+    by_slug = {i.slug: i for i in items}
+    pairs = _load_pairs(args, items, config)
+
+    labels = load_labels(Path(args.labels))
+    if not labels:
+        raise SystemExit(f"no labels at {args.labels}. Run `evald label` first.")
+
+    labelled_ids = set(labels)
+    to_judge = [p for p in pairs if p.pair_id in labelled_ids]
+
+    store = GenerationStore(ResponseCache(args.cache), config, args.max_tokens)
+
+    projection_note = (
+        f"Judging {len(to_judge)} labelled pairs x 2 positions = {len(to_judge) * 2} calls "
+        f"on {args.judge_model}."
+    )
+    print(projection_note)
+    if not args.yes and input("Proceed? [y/N] ").strip().lower() != "y":
+        return 1
+
+    with GatewayClient(args.gateway) as client:
+        if not client.health():
+            raise SystemExit(f"gateway at {args.gateway} is not healthy; start it with `make up`.")
+
+        judge = PairwiseJudge(
+            args.judge_model, _judge_complete(client), max_tokens=args.judge_max_tokens
+        )
+        judgments = judge_pairs(to_judge, by_slug, store, judge, seed=args.seed)
+
+        ground_truth = None
+        caveat = ""
+        if not args.skip_ground_truth:
+            candidates = [m for m in _models(args, config.by_cost()) if m != config.reference_model]
+            ground_truth = check_ground_truth(
+                items,
+                candidates,
+                config.reference_model,
+                store,
+                judge,
+                args.seed,
+                limit=args.gt_limit,
+            )
+            caveat = (
+                "Measured only on gradable items where exactly one side is correct. The maths "
+                "slice is verified not-too-easy but not yet verified not-too-hard (DECISIONS.md "
+                "D-030), so this accuracy may be computed on an unrepresentative difficulty band."
+            )
+
+    report = build_calibration_report(
+        labels=labels,
+        judgments=judgments,
+        pairs=pairs,
+        judge_model=args.judge_model,
+        reference_model=config.reference_model,
+        rubric_version=RUBRIC_VERSION,
+        corpus_sha=corpus_sha256(items),
+        labeler=args.labeler,
+        seed=args.seed,
+        ground_truth=ground_truth,
+        ground_truth_caveat=caveat,
+    )
+
+    out = write_report(report, Path(args.artifacts))
+    print()
+    print(report.summary())
+    print(f"\nreport: {out}")
+    if not report.clears_gate:
+        print(
+            "\nThe judge did NOT clear the gate. The number stands as measured; see "
+            "`diagnosis` and `disagreements` in the report, revise the rubric, bump "
+            "RUBRIC_VERSION, and re-label a FRESH sample.",
+            file=sys.stderr,
+        )
+        return 4
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="evald")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -349,6 +509,36 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     pilot.set_defaults(func=cmd_pilot)
+
+    label = sub.add_parser("label", help="hand-label sampled pairs (blind, resumable)")
+    label.add_argument("--config", default="../../config/models.yaml")
+    label.add_argument("--corpus", type=Path, default=DEFAULT_CORPUS)
+    label.add_argument("--cache", type=Path, default=DEFAULT_CACHE)
+    label.add_argument("--labels", type=Path, default=DEFAULT_LABELS)
+    label.add_argument("--models", default="")
+    label.add_argument("--pairs", type=int, default=200)
+    label.add_argument("--max-tokens", type=int, default=1024)
+    label.add_argument("--seed", type=int, default=20260915)
+    label.set_defaults(func=cmd_label)
+
+    cal = sub.add_parser("calibrate", help="judge the labelled pairs and report kappa")
+    cal.add_argument("--config", default="../../config/models.yaml")
+    cal.add_argument("--corpus", type=Path, default=DEFAULT_CORPUS)
+    cal.add_argument("--cache", type=Path, default=DEFAULT_CACHE)
+    cal.add_argument("--labels", type=Path, default=DEFAULT_LABELS)
+    cal.add_argument("--artifacts", type=Path, default=DEFAULT_ARTIFACTS)
+    cal.add_argument("--gateway", default="http://localhost:8080")
+    cal.add_argument("--models", default="")
+    cal.add_argument("--pairs", type=int, default=200)
+    cal.add_argument("--max-tokens", type=int, default=1024)
+    cal.add_argument("--judge-model", default="claude-opus-5")
+    cal.add_argument("--judge-max-tokens", type=int, default=700)
+    cal.add_argument("--labeler", default="iraa")
+    cal.add_argument("--gt-limit", type=int, default=150)
+    cal.add_argument("--skip-ground-truth", action="store_true")
+    cal.add_argument("--seed", type=int, default=20260915)
+    cal.add_argument("--yes", action="store_true")
+    cal.set_defaults(func=cmd_calibrate)
 
     return p
 

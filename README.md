@@ -65,7 +65,7 @@ Response headers carry what Verdict did, so the body stays a byte-for-byte OpenA
 
 ```bash
 make install      # pnpm workspace + evald virtualenv (Python 3.12)
-make test         # 156 TypeScript tests, 153 Python tests
+make test         # 162 TypeScript tests, 250 Python tests
 make lint         # eslint, prettier, ruff
 make typecheck    # tsc --strict, mypy --strict
 ```
@@ -77,6 +77,9 @@ make corpus                 # rebuild the frozen corpus from public datasets (fr
 make plan CAP=30            # show projected cost. Spends nothing.
 make pilot CAP=1 N=200      # measure whether the gradable slice discriminates
 make bench CAP=30           # run it; writes a versioned artifact
+
+make label PAIRS=200        # hand-label pairs for judge calibration (free)
+make calibrate PAIRS=200    # judge them, write calibration_report.json
 ```
 
 `make bench` refuses to start without a spend cap, prints a projection before spending anything, and
@@ -110,8 +113,8 @@ artifacts/       Committed benchmark output. The only source of any number.
 | P0    | Design, decisions, scaffold, CI, docker compose                | done   |
 | P1    | Gateway: streaming proxy, adapters, traces, cost accounting    | done   |
 | P2    | Benchmark corpus + deterministic replay runner                 | done   |
-| P3    | LLM-as-judge + calibration against human labels (Cohen's κ)    | next   |
-| P4    | Paired bootstrap CIs, McNemar, regression-vs-noise verdicts    |        |
+| P3    | LLM-as-judge + calibration against human labels (Cohen's κ)    | built  |
+| P4    | Paired bootstrap CIs, McNemar, regression-vs-noise verdicts    | next   |
 | P5    | Cascade router, threshold fitting, Pareto curve                |        |
 | P6    | Semantic cache with calibrated threshold; hit + false-hit rate |        |
 | P7    | Dashboard + GitHub Action PR comments                          |        |

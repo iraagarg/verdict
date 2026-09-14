@@ -19,3 +19,6 @@ __pycache__/
 # Replay response cache. Content-addressed and reproducible, but ~10s of MB and
 # regenerable, so it is not committed. Deleting it only costs money to refill.
 .cache/
+
+# Human labels are real measurement data and ARE committed (calibration/labels.jsonl).
+# Nothing to ignore here; this note exists so nobody adds it later by reflex.
