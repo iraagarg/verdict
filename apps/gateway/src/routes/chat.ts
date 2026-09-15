@@ -34,12 +34,10 @@ import { withRetry } from "../resilience/retry.js";
 import { CircuitOpenError } from "../resilience/breaker.js";
 import { IncompatibleParameterError, normalizeRequest } from "../providers/normalize.js";
 import { ProviderError, type ProviderEvent } from "../providers/types.js";
+import { AUTO_MODEL, parseModeOverride, selectModel } from "../router/select.js";
 import type { GatewayApp } from "../http.js";
 import type { GatewayServices } from "../services.js";
 import type { TraceRow } from "../trace/repository.js";
-
-/** Delegates model choice to the router. P1 resolves it to safe_default; P5 fits a policy. */
-const AUTO_MODEL = "verdict-auto";
 
 function canonicalRequestHash(body: unknown): Buffer {
   return createHash("sha256").update(JSON.stringify(body)).digest();
@@ -147,11 +145,22 @@ export function registerChatRoutes(app: GatewayApp, services: GatewayServices): 
     const body = parsed.data;
 
     // ── resolve model ───────────────────────────────────────────────────────
-    // P1 has no fitted policy, so `verdict-auto` resolves to safe_default.
-    // P5 replaces this with the nearest-route lookup. The fallback direction is
-    // the point: ambiguity always resolves toward quality (DESIGN.md §8.2).
+    // Ambiguity always resolves toward quality: no policy, no route hint, an
+    // unknown route or a disabled router all serve safe_default (DESIGN.md §8.2).
+    //
+    // The per-request override lets a caller force the router off (or on) for
+    // one request, which is what makes a live A/B or a quick bisect possible
+    // without a redeploy.
     const modelWasPinned = body.model !== AUTO_MODEL;
-    const modelId = modelWasPinned ? body.model : registry.config.safe_default;
+    const routeHint = req.headers["x-verdict-route"];
+    const selection = selectModel({
+      requestedModel: body.model,
+      routeHint: typeof routeHint === "string" ? routeHint : undefined,
+      mode: parseModeOverride(req.headers["x-verdict-router"]) ?? env.ROUTER_MODE,
+      policy: services.policy,
+      fallbackModel: registry.config.safe_default,
+    });
+    const modelId = selection.model;
 
     if (registry.config.models[modelId] === undefined) {
       return reply
@@ -232,8 +241,8 @@ export function registerChatRoutes(app: GatewayApp, services: GatewayServices): 
         id: randomUUID(),
         requestId,
         createdAt: new Date(startedAt),
-        routeKey: null, // P5 fills this in
-        policyVersion: null,
+        routeKey: selection.routeKey,
+        policyVersion: services.policy?.policy_version ?? null,
         modelRequested: body.model,
         modelServed: modelId,
         provider: resolved.adapter.name,
@@ -347,7 +356,8 @@ export function registerChatRoutes(app: GatewayApp, services: GatewayServices): 
     const commonHeaders = (): void => {
       void reply.header("x-verdict-model-served", modelId);
       void reply.header("x-verdict-provider", resolved.adapter.name);
-      void reply.header("x-verdict-route", "unrouted");
+      void reply.header("x-verdict-route", selection.routeKey ?? "unrouted");
+      void reply.header("x-verdict-route-reason", selection.reason);
       if (normalized.droppedParams.length > 0) {
         void reply.header("x-verdict-dropped-params", normalized.droppedParams.join(","));
       }
@@ -367,6 +377,12 @@ export function registerChatRoutes(app: GatewayApp, services: GatewayServices): 
       reply.raw.setHeader("x-verdict-request-id", requestId);
       reply.raw.setHeader("x-verdict-model-served", modelId);
       reply.raw.setHeader("x-verdict-provider", resolved.adapter.name);
+      reply.raw.setHeader("x-verdict-route", selection.routeKey ?? "unrouted");
+      // Streaming cannot cascade: the confidence check needs the WHOLE cheap
+      // response, so a cascade would have to buffer it and destroy the
+      // time-to-first-token that streaming exists for (DECISIONS.md D-040).
+      // Streaming requests therefore always take the offline path.
+      reply.raw.setHeader("x-verdict-route-reason", selection.reason);
       if (normalized.droppedParams.length > 0) {
         reply.raw.setHeader("x-verdict-dropped-params", normalized.droppedParams.join(","));
       }

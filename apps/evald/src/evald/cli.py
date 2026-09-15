@@ -43,6 +43,7 @@ from evald.replay.client import GatewayClient
 from evald.replay.plan import TOKEN_ESTIMATE_METHOD, compare_projection, project_run
 from evald.replay.ratelimit import NullRateLimiter, RateLimiter
 from evald.replay.runner import build_tasks, request_params, run_replay, summarise
+from evald.router.fit import FIT_SPLIT, REPORT_SPLIT, fit_and_report
 
 DEFAULT_CORPUS = Path("../../corpus/items.jsonl")
 DEFAULT_CACHE = Path("../../.cache/replay")
@@ -447,6 +448,72 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_fit(args: argparse.Namespace) -> int:
+    """Fit the routing policy on TRAIN and report it on HELD-OUT.
+
+    Consumes judged replay records; calls no models, so the threshold sweep is
+    free and exactly reproducible.
+    """
+    config = load_model_config(args.config)
+    records_path = Path(args.records)
+    if not records_path.is_file():
+        raise SystemExit(
+            f"no routing records at {records_path}.\n"
+            f"These are built from judged replay runs: every corpus item needs, for each "
+            f"model, whether it won-or-tied the reference and what it cost. "
+            f"Run `evald replay run` and `evald judge` first."
+        )
+
+    from evald.router.records import ItemRecord
+
+    records = [
+        ItemRecord(**json.loads(line))
+        for line in records_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+    ladder = [m for m in config.by_cost()]
+    out = fit_and_report(
+        records,
+        cheap_model=args.cheap_model or ladder[0],
+        strong_model=config.safe_default,
+        ladder=ladder,
+        safe_default=config.safe_default,
+        created_at=now_iso(),
+        git_sha=git_sha(),
+        corpus_sha256=corpus_sha256(load_corpus(args.corpus)),
+        judge_model=args.judge_model,
+        rubric_version=RUBRIC_VERSION,
+        reference_model=config.reference_model,
+        floor=args.floor,
+        margin=args.margin,
+        k_samples=args.k_samples,
+        verifier_cost_nano=args.verifier_cost_nano,
+        seed=args.seed,
+    )
+
+    artifacts = Path(args.artifacts)
+    pareto_path = out.pareto.write(artifacts / "pareto.json")
+    policy_path = out.policy.write(artifacts / "policy.json")
+
+    print(f"fit on {FIT_SPLIT!r}, reported on {REPORT_SPLIT!r}")
+    print(f"  pareto: {pareto_path}")
+    print(f"  policy: {policy_path}")
+    if out.pareto.chosen_threshold is None:
+        print(f"\n  {out.pareto.no_eligible_threshold_reason}", file=sys.stderr)
+        return 5
+
+    held = out.pareto.held_out
+    assert held is not None
+    print(f"\n  chosen threshold  {out.pareto.chosen_threshold}  (on {FIT_SPLIT})")
+    print(
+        f"  HELD-OUT quality  {held.quality:.4f}   cost {held.cost_ratio * 100:.1f}% of all-strong"
+    )
+    print(f"  HELD-OUT verdict  {held.verdict}  (n={held.n})")
+    print("\n  Only the HELD-OUT numbers may be quoted.")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="evald")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -539,6 +606,20 @@ def build_parser() -> argparse.ArgumentParser:
     cal.add_argument("--seed", type=int, default=20260915)
     cal.add_argument("--yes", action="store_true")
     cal.set_defaults(func=cmd_calibrate)
+
+    fit = sub.add_parser("fit", help="fit the routing policy and write pareto.json + policy.json")
+    fit.add_argument("--config", default="../../config/models.yaml")
+    fit.add_argument("--corpus", type=Path, default=DEFAULT_CORPUS)
+    fit.add_argument("--records", type=Path, default=Path("../../artifacts/routing-records.jsonl"))
+    fit.add_argument("--artifacts", type=Path, default=DEFAULT_ARTIFACTS)
+    fit.add_argument("--cheap-model", default="")
+    fit.add_argument("--judge-model", default="claude-opus-5")
+    fit.add_argument("--floor", type=float, default=0.9)
+    fit.add_argument("--margin", type=float, default=0.03)
+    fit.add_argument("--k-samples", type=int, default=3)
+    fit.add_argument("--verifier-cost-nano", type=int, default=0)
+    fit.add_argument("--seed", type=int, default=20260915)
+    fit.set_defaults(func=cmd_fit)
 
     return p
 

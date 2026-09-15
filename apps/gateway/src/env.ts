@@ -39,6 +39,12 @@ const apiKey = z.preprocess(
 
 const port = z.coerce.number().int().min(1).max(65535);
 
+/** A path that may be absent, where an empty string also means absent. */
+const optionalPath = z.preprocess(
+  (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+  z.string().min(1).optional(),
+);
+
 /** A URL that may be absent, where an empty string also means absent. */
 const optionalUrl = z.preprocess(
   (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
@@ -107,8 +113,28 @@ export const EnvSchema = z
 
     /** Path to the model ladder. Absolute in Docker, relative in dev. */
     MODELS_CONFIG_PATH: z.string().min(1).default("config/models.yaml"),
+
+    // --- router (P5) ---
+    /**
+     * Feature flag. "off" serves safe_default for every auto-routed request,
+     * which is the behaviour before a policy exists. Default off: a fitted
+     * policy must be switched on deliberately, never inherited by accident.
+     */
+    ROUTER_MODE: z.enum(["off", "offline"]).default("off"),
+    /** Fitted policy artifact. Absent means the router has nothing to serve. */
+    POLICY_PATH: optionalPath,
   })
   .superRefine((env, ctx) => {
+    // A router switched on with nothing to route by would silently serve
+    // safe_default forever and look like it was working.
+    if (env.ROUTER_MODE !== "off" && env.POLICY_PATH === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["POLICY_PATH"],
+        message: `ROUTER_MODE is "${env.ROUTER_MODE}" but POLICY_PATH is not set; the router would have no policy to serve`,
+      });
+    }
+
     if (env.RETRY_MAX_DELAY_MS < env.RETRY_BASE_DELAY_MS) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,

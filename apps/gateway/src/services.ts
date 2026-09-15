@@ -10,6 +10,7 @@ import { ProviderRegistry } from "./providers/registry.js";
 import { TraceQueue } from "./trace/queue.js";
 import { createTraceSink, type TraceRow } from "./trace/repository.js";
 import { createPool } from "./db/pool.js";
+import { assertServable, loadPolicy, type PolicyArtifact } from "./router/policy.js";
 import type { ProviderAdapter, ProviderName } from "./providers/types.js";
 import type { Env } from "./env.js";
 
@@ -17,6 +18,8 @@ export interface GatewayServices {
   env: Env;
   config: ModelConfig;
   registry: ProviderRegistry;
+  /** Undefined when no POLICY_PATH is configured. */
+  policy: PolicyArtifact | undefined;
   traces: TraceQueue<TraceRow>;
   pool: Pool | undefined;
   close: () => Promise<void>;
@@ -35,6 +38,14 @@ export function buildServices(opts: BuildServicesOptions): GatewayServices {
   const config = loadModelConfig(env.MODELS_CONFIG_PATH);
   const registry = new ProviderRegistry(config, env, opts.adapters);
 
+  // Loaded and validated at boot. A malformed policy, or one naming models this
+  // gateway has no key for, must fail here rather than mis-route live traffic.
+  let policy: PolicyArtifact | undefined;
+  if (env.POLICY_PATH !== undefined) {
+    policy = loadPolicy(env.POLICY_PATH);
+    assertServable(policy, (model) => registry.isServable(model));
+  }
+
   const pool = opts.traceSink === undefined ? createPool(env) : undefined;
   const sink = opts.traceSink ?? createTraceSink(pool!);
 
@@ -50,6 +61,7 @@ export function buildServices(opts: BuildServicesOptions): GatewayServices {
     env,
     config,
     registry,
+    policy,
     traces,
     pool,
     close: async () => {

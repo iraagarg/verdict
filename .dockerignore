@@ -7,4 +7,5 @@
 **/*.tsbuildinfo
 .git
 .env
-artifacts
+# artifacts/ IS copied into the gateway image: policy.json lives there and the
+# router loads it at boot. The cache and corpus are still excluded.

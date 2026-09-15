@@ -1008,3 +1008,106 @@ scipy is a dev dependency only.
 **Consequence.** Counting a tie as success is the generous reading, biasing toward finding a cheap
 model acceptable. That is deliberate: D-004's `ci.low >= floor` rule pulls the other way, so the two
 controls are set against each other rather than compounding.
+
+---
+
+## D-037 — Hybrid confidence signal: self-consistency where exact, verifier elsewhere
+
+**Status:** ACCEPTED · **Date:** 2026-09-15 · **Phase:** P5
+
+**Decision.** Gradable items (maths, multiple choice) escalate on **self-consistency**: sample the
+cheap model K=3 times and check whether the _extracted answers_ agree, reusing the verifiers built
+and tested in P2. Free-form items escalate on a **cheap verifier model's** adequacy score.
+
+**Rationale.** Self-consistency is only meaningful when "do these answers agree?" has an exact
+answer. For a maths problem it does — two extracted numbers are equal or they are not, no second
+model and no semantic guesswork. For two paragraphs of prose it does not: agreement is a question
+about meaning, and the embedding model that would answer it cheaply is still unchosen
+(`config/models.yaml` has it as `null`). A lexical similarity heuristic was rejected because it is a
+poor proxy for semantic agreement, and the free-form half is exactly where routing decisions are
+hardest — an unreliable signal there is worse than an honest extra call.
+
+**Consequence.** The confidence check is **not free, and the cost model says so**. Gradable items pay
+for K cheap calls; free-form items pay for one cheap call plus one verifier call; escalated items pay
+for all of that _and_ the strong call. This makes always-escalating strictly **more expensive** than
+never cascading at all, which the sweep shows directly (cost ratio 102.5% at τ=1.0 on synthetic
+data). A cascade that omitted the confidence check from its cost model would report savings it does
+not deliver, and that omission is the most common way cascade results are overstated.
+
+---
+
+## D-038 — Fit on dev, report on test, and assert the separation
+
+**Status:** ACCEPTED · **Date:** 2026-09-15 · **Phase:** P5
+
+**Decision.** The escalation threshold is fitted on the **dev** split and the chosen threshold is
+evaluated once on the **test** split. `assert_disjoint` raises if a single slug appears in both. Only
+the held-out numbers may be quoted, and the artifact records which split played which role.
+
+**Rationale.** A threshold fitted on the data it is reported on will look excellent and mean nothing,
+and — this is the dangerous part — the output gives no hint that it happened. A leaked fit is
+indistinguishable from a good one by inspection. So the separation is checked in code rather than
+trusted to discipline, and there is a test that plants a leak and asserts it is caught.
+
+`calibration` is deliberately not used here: it is spoken for by P3's judge labels, and mixing the
+instrument's training data into the policy's would couple two things that must be able to fail
+independently.
+
+**Consequence.** The report-split sweep is still written to `pareto.json`, clearly marked
+`role: "report"`, purely so a reader can see the whole curve. It played no part in selection, and the
+artifact says so in its notes.
+
+**When nothing qualifies.** If no threshold on dev is shown non-inferior to always using the strong
+model, `operating_point()` returns `None` and the artifact explains why. That is a real result — keep
+using the strong model — not a failure of the sweep, and the message says so explicitly so it is not
+quietly treated as a bug.
+
+---
+
+## D-039 — Route keys are task types, not embedding clusters (for now)
+
+**Status:** ACCEPTED · **Date:** 2026-09-15 · **Phase:** P5 · **Amends:** D-004
+
+**Decision.** The offline policy's route key is the corpus **task type**. At request time the gateway
+takes the route from an explicit `x-verdict-route` header; with no hint, it serves `safe_default`.
+
+**Rationale.** D-004 envisaged clustering prompt embeddings, but the embedding model is still
+unchosen and its dimension is a migration-breaking constant (D-015). Picking one now to unblock P5
+would bake an arbitrary choice into the policy and into two HNSW indexes. Task type is a real,
+explainable routing key that needs no embeddings at all, and swapping in embedding clusters later
+changes how `route_key` is _derived_ and nothing else — the policy schema, the gateway lookup and the
+fitting code are all unaffected.
+
+**Consequence, stated plainly.** The gateway cannot currently infer a route from the prompt, so an
+un-hinted request gets no discount. That is the correct failure direction (DESIGN.md §8.2: ambiguity
+resolves toward quality) but it does mean the live cost saving is only available to callers who label
+their traffic. Prompt-side route inference is P6 work, arriving with the embedding model.
+
+---
+
+## D-040 — Cascade runs offline only; the live path serves the offline policy
+
+**Status:** ACCEPTED · **Date:** 2026-09-15 · **Phase:** P5 · **Affects:** P7, P8
+
+**Decision.** The gateway implements the offline per-route policy behind `ROUTER_MODE`, with a
+per-request `x-verdict-router` override. The cascade is fitted and evaluated in `evald` but is **not**
+in the live request path. `policy.json` carries the cascade configuration with `enabled: false`.
+
+**Two reasons, both structural.**
+
+**Streaming.** The confidence check needs the cheap model's _whole_ answer before it can decide. A
+streaming request would therefore have to buffer the entire cheap generation, check confidence, and
+only then start emitting — destroying the time-to-first-token that streaming exists for, and
+destroying it _again_ on escalation. This is the same constraint as D-019's "retry only before the
+first byte", one step worse.
+
+**Two implementations of the verifiers.** The self-consistency signal compares _extracted_ answers,
+using the regex verifiers written and tested in Python (P2). Putting the cascade in the gateway means
+reimplementing them in TypeScript, and two implementations of the same extraction logic will
+eventually disagree — which is precisely the failure D-024 avoided by routing replay through the
+gateway instead of building a second cost path.
+
+**Consequence.** The measured cascade result is an _offline_ result and the README must say so. The
+live saving comes from the offline policy. Moving the cascade into the live path needs either a
+shared verifier implementation (a WASM build, or an evald sidecar call) or acceptance of the
+buffering cost, and that is a decision to make with measurements in hand rather than now.

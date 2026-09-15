@@ -80,6 +80,8 @@ services:
       COST_CAP_USD_PER_DAY: ${COST_CAP_USD_PER_DAY:-5.00}
       # Point a provider at a local mock to exercise streaming without spending
       # money. Unset in normal use.
+      ROUTER_MODE: ${ROUTER_MODE:-off}
+      POLICY_PATH: ${POLICY_PATH:-}
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
       GROQ_BASE_URL: ${GROQ_BASE_URL:-}

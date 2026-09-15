@@ -440,6 +440,139 @@ describe("POST /v1/chat/completions — client disconnect", () => {
   });
 });
 
+describe("POST /v1/chat/completions — routing", () => {
+  const POLICY = {
+    policy_version: 1,
+    created_at: "2026-09-15T00:00:00+00:00",
+    git_sha: "abc",
+    corpus_sha256: "f".repeat(64),
+    safe_default: "claude-opus-5",
+    floor: 0.9,
+    margin: 0.03,
+    routes: [
+      {
+        route_key: "multiple_choice",
+        assigned_model: "claude-haiku-4-5",
+        n_items: 300,
+        quality: 0.96,
+        ci_low: 0.93,
+        ci_high: 0.98,
+        floor: 0.9,
+        reason: "cleared the floor",
+      },
+    ],
+    cascade: null,
+  };
+
+  let policyPath: string;
+
+  beforeEach(async () => {
+    const { mkdtempSync, writeFileSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    policyPath = join(mkdtempSync(join(tmpdir(), "verdict-p5-")), "policy.json");
+    writeFileSync(policyPath, JSON.stringify(POLICY));
+    provider.setScript({ events: anthropicScript(["routed"]) });
+  });
+
+  const send = (headers: Record<string, string> = {}) =>
+    app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      headers,
+      payload: { model: "verdict-auto", messages: [{ role: "user", content: "hi" }] },
+    });
+
+  it("routes verdict-auto to the policy's model when the flag is on", async () => {
+    await boot({ ROUTER_MODE: "offline", POLICY_PATH: policyPath });
+    const res = await send({ "x-verdict-route": "multiple_choice" });
+    expect(res.headers["x-verdict-model-served"]).toBe("claude-haiku-4-5");
+    expect(res.headers["x-verdict-route-reason"]).toBe("policy_route");
+  });
+
+  it("serves the safe default when the flag is off, even with a policy loaded", async () => {
+    await boot({ ROUTER_MODE: "off" });
+    const res = await send({ "x-verdict-route": "multiple_choice" });
+    expect(res.headers["x-verdict-model-served"]).toBe("claude-opus-5");
+    expect(res.headers["x-verdict-route-reason"]).toBe("router_off");
+  });
+
+  it("honours a per-request override that disables the router", async () => {
+    // What makes a live bisect possible without a redeploy.
+    await boot({ ROUTER_MODE: "offline", POLICY_PATH: policyPath });
+    const res = await send({ "x-verdict-route": "multiple_choice", "x-verdict-router": "off" });
+    expect(res.headers["x-verdict-model-served"]).toBe("claude-opus-5");
+    expect(res.headers["x-verdict-route-reason"]).toBe("router_off");
+  });
+
+  it("honours a per-request override that enables the router", async () => {
+    await boot({ ROUTER_MODE: "off", POLICY_PATH: policyPath });
+    const res = await send({ "x-verdict-route": "multiple_choice", "x-verdict-router": "offline" });
+    expect(res.headers["x-verdict-model-served"]).toBe("claude-haiku-4-5");
+  });
+
+  it("serves the safe default for a route the policy never saw", async () => {
+    await boot({ ROUTER_MODE: "offline", POLICY_PATH: policyPath });
+    const res = await send({ "x-verdict-route": "astrology" });
+    expect(res.headers["x-verdict-model-served"]).toBe("claude-opus-5");
+    expect(res.headers["x-verdict-route-reason"]).toBe("unknown_route");
+  });
+
+  it("serves the safe default when no route hint is supplied", async () => {
+    await boot({ ROUTER_MODE: "offline", POLICY_PATH: policyPath });
+    const res = await send();
+    expect(res.headers["x-verdict-model-served"]).toBe("claude-opus-5");
+    expect(res.headers["x-verdict-route-reason"]).toBe("no_route_hint");
+  });
+
+  it("records the route and policy version on the trace", async () => {
+    await boot({ ROUTER_MODE: "offline", POLICY_PATH: policyPath });
+    await send({ "x-verdict-route": "multiple_choice" });
+    const trace = await traceFor();
+    expect(trace.routeKey).toBe("multiple_choice");
+    expect(trace.policyVersion).toBe(1);
+  });
+
+  it("refuses to boot when the router is on but no policy is configured", async () => {
+    // Otherwise it silently serves safe_default forever and looks like it works.
+    expect(() => envWith({ ROUTER_MODE: "offline" })).toThrow(/POLICY_PATH/);
+  });
+
+  it("refuses to boot on a policy naming a model it cannot serve", async () => {
+    const { mkdtempSync, writeFileSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const bad = join(mkdtempSync(join(tmpdir(), "verdict-p5-")), "policy.json");
+    writeFileSync(
+      bad,
+      JSON.stringify({ ...POLICY, routes: [{ ...POLICY.routes[0], assigned_model: "gpt-5" }] }),
+    );
+    // No OPENAI_API_KEY in this environment, so gpt-5 is unservable.
+    expect(() =>
+      buildServices({
+        env: envWith({ ROUTER_MODE: "offline", POLICY_PATH: bad }),
+        traceSink: async () => {},
+      }),
+    ).toThrow(/gpt-5/);
+  });
+
+  it("streaming requests still route, and report which path they took", async () => {
+    await boot({ ROUTER_MODE: "offline", POLICY_PATH: policyPath });
+    const res = await fetch(`${baseUrl}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-verdict-route": "multiple_choice" },
+      body: JSON.stringify({
+        model: "verdict-auto",
+        messages: [{ role: "user", content: "hi" }],
+        stream: true,
+      }),
+    });
+    expect(res.headers.get("x-verdict-model-served")).toBe("claude-haiku-4-5");
+    expect(res.headers.get("x-verdict-route")).toBe("multiple_choice");
+    await res.text();
+  });
+});
+
 describe("POST /v1/chat/completions — failure handling", () => {
   it("retries a 500 before any byte reaches the client, then succeeds", async () => {
     provider = await startMockProvider();

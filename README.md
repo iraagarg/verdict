@@ -65,7 +65,7 @@ Response headers carry what Verdict did, so the body stays a byte-for-byte OpenA
 
 ```bash
 make install      # pnpm workspace + evald virtualenv (Python 3.12)
-make test         # 162 TypeScript tests, 314 Python tests
+make test         # 184 TypeScript tests, 354 Python tests
 make lint         # eslint, prettier, ruff
 make typecheck    # tsc --strict, mypy --strict
 ```
@@ -80,7 +80,24 @@ make bench CAP=30           # run it; writes a versioned artifact
 
 make label PAIRS=200        # hand-label pairs for judge calibration (free)
 make calibrate PAIRS=200    # judge them, write calibration_report.json
+
+make fit                    # fit the routing policy; writes pareto.json + policy.json
 ```
+
+### Routing
+
+The router is **off by default** and must be switched on deliberately:
+
+```bash
+ROUTER_MODE=offline POLICY_PATH=artifacts/policy.json docker compose up -d gateway
+```
+
+Send `model: "verdict-auto"` plus an `x-verdict-route` header to get the policy's assigned model.
+Every ambiguous case — router off, no policy, no route hint, an unknown route — serves the strong
+`safe_default` instead. Cost optimisation only happens where there is positive evidence it is safe.
+
+Per-request override: `x-verdict-router: off | offline`. Response headers report
+`x-verdict-route` and `x-verdict-route-reason` so you can always see which path a request took.
 
 `make bench` refuses to start without a spend cap, prints a projection before spending anything, and
 aborts hard if the cap is reached — writing a partial artifact marked `aborted_budget` so a truncated
@@ -115,7 +132,7 @@ artifacts/       Committed benchmark output. The only source of any number.
 | P2    | Benchmark corpus + deterministic replay runner                 | done   |
 | P3    | LLM-as-judge + calibration against human labels (Cohen's κ)    | built  |
 | P4    | Paired bootstrap CIs, McNemar, regression-vs-noise verdicts    | built  |
-| P5    | Cascade router, threshold fitting, Pareto curve                | next   |
-| P6    | Semantic cache with calibrated threshold; hit + false-hit rate |        |
+| P5    | Cascade router, threshold fitting, Pareto curve                | built  |
+| P6    | Semantic cache with calibrated threshold; hit + false-hit rate | next   |
 | P7    | Dashboard + GitHub Action PR comments                          |        |
 | P8    | Deploy, load test, README, demo                                |        |
