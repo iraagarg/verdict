@@ -881,3 +881,130 @@ pair. Every label is appended to disk immediately and records the slot shown and
 
 **Consequence.** `calibration/labels.jsonl` is committed. It is real measurement data and the human
 half of every κ this project reports.
+
+---
+
+## D-034 — Why paired bootstrap rather than a t-test (the interview answer)
+
+**Status:** ACCEPTED · **Date:** 2026-09-15 · **Phase:** P4 · **Implements:** D-011
+
+**The question you will be asked:** "Why not just run a t-test?"
+
+**The short answer, in one breath.** A t-test assumes the thing being averaged is roughly
+bell-shaped and unbounded. What we are averaging is a difference of two rates between 0 and 1, built
+from a three-valued outcome, on a few hundred items. None of those assumptions hold, and the
+bootstrap does not need them — it works out the uncertainty by re-running the experiment on the data
+we already have.
+
+**The longer answer, in four parts.**
+
+**1. The data is not shaped like a t-test expects.** Each item produces `win`, `tie` or `loss` — three
+discrete buckets, not a continuous measurement. We turn that into a rate, and a rate is bounded at 0
+and 1. When a model's win-or-tie rate is near 0.9, the distribution of the estimate is squashed
+against the ceiling and visibly lopsided. A t-test would draw a symmetric interval that extends past
+1.0, which is not a possible value. The bootstrap interval is built from actual resampled values, so
+it cannot leave the range the data lives in.
+
+**2. It is a difference of two dependent rates, not one mean.** Even a paired t-test assumes the
+per-item differences are normally distributed. Here each per-item difference can only be one of a
+handful of values (−1, 0, +1 for the binarised metric). A t-test on that is an approximation whose
+error depends on the sample size and the rate, and we have no way to check it. The bootstrap makes
+no claim about the shape at all.
+
+**3. Pairing is where most of the variance goes, and it must be preserved.** The same items are
+scored by both arms. Some items are simply hard and drag both arms down together; some are easy and
+lift both. That shared item difficulty is the single largest source of variance, and it cancels
+exactly when the arms are compared item by item. We resample **items**, carrying each item's pair of
+outcomes together, so the cancellation inside every resample matches the cancellation in the real
+data. `test_identical_arms_give_a_zero_effect_and_a_zero_width_interval` is the proof this is wired
+up: two identical arms produce an interval of exactly zero width, because every resample cancels.
+An unpaired bootstrap would report spurious width there, and a two-sample t-test would too.
+
+**4. The honest reason, which is the one worth saying out loud.** With a t-test I would be asserting
+that the sampling distribution is approximately normal, and I could not check it. With the
+bootstrap I make no such assertion and can explain every line of the implementation. For a project
+whose entire claim is "this number is trustworthy", a method I can fully defend beats a method that
+is marginally more powerful under assumptions I cannot verify.
+
+**What a t-test would actually get wrong here:** intervals that extend outside [0, 1] at high rates;
+overconfident intervals when the discordant count is small, which is the common case with two similar
+models; and no way to notice either problem had happened.
+
+**When a t-test would have been fine.** If the metric were a continuous score (a 1–5 rubric averaged
+over many items) with n in the thousands, the Central Limit Theorem would do the work and the two
+methods would agree to three decimal places. The bootstrap costs a few seconds of CPU, so there is
+no reason to take the risk of finding out we were in the other regime.
+
+**Alternatives rejected.** _Paired t-test_ — as above. _BCa bootstrap_ — corrects for skew and bias
+and is the more "correct" interval, but at n≈150 the acceleration term moves the interval marginally
+and it is something I would be reciting rather than explaining (D-011). _Wilcoxon signed-rank_ —
+distribution-free and a reasonable choice, but it tests a shift in the median of the differences and
+reports no effect size in the units anyone cares about; the routing rule needs an interval in
+win-or-tie rate points, not a rank statistic.
+
+---
+
+## D-035 — Four verdicts, because "no significant difference" hides two opposite findings
+
+**Status:** ACCEPTED · **Date:** 2026-09-15 · **Phase:** P4 · **Affects:** P5
+
+**Decision.** `REGRESSION`, `IMPROVEMENT`, `EQUIVALENT`, `INCONCLUSIVE` — decided by where the
+confidence interval sits relative to a practical-significance margin (default ±0.03 in win-or-tie
+rate points), not by whether a p-value crosses 0.05.
+
+| Interval vs margin      | Verdict        | Means                                                           |
+| ----------------------- | -------------- | --------------------------------------------------------------- |
+| entirely below −margin  | `REGRESSION`   | worse, by an amount that matters                                |
+| entirely above +margin  | `IMPROVEMENT`  | better, by an amount that matters                               |
+| entirely inside ±margin | `EQUIVALENT`   | **evidence of absence** — we measured precisely and it is small |
+| straddles a boundary    | `INCONCLUSIVE` | **absence of evidence** — this run cannot tell                  |
+
+**Rationale.** "No significant difference" is the weakest claim in statistics and it conflates two
+opposite situations: a precise measurement of a small effect, and no useful measurement at all. A run
+on 20 items with an enormous interval and a run on 20,000 items with a tight one would both report
+it. The first must not license demoting a route; the second should.
+
+This matters here specifically because D-004's routing rule is already a non-inferiority test
+(`ci.low >= floor`). P4 should speak the same language, or the two layers would be making
+incompatible kinds of claim about the same data.
+
+The margin also separates statistical from practical significance. A 1.5-point difference measured
+over 20,000 items is real and detectable and nobody cares; `test_separates_statistical_from_practical_significance`
+pins that case as `EQUIVALENT` while still reporting `statistically_significant: true`.
+
+**Consequence.** The margin is a product judgement, not a statistical one, so it lives in config and
+must be chosen before looking at results. `can_demonstrate_equivalence` reports whether the interval
+is even narrow enough to fit inside the margin — a run wider than that can still reach `REGRESSION`
+or `IMPROVEMENT` if the effect is large, but can never reach `EQUIVALENT`, and says so.
+
+---
+
+## D-036 — McNemar on win-or-tie, exact below 25 discordant pairs
+
+**Status:** ACCEPTED · **Date:** 2026-09-15 · **Phase:** P4
+
+**Decision.** Success = win-or-tie against the frozen reference, matching D-003's metric and D-004's
+floor exactly. The exact binomial test is used when there are fewer than 25 discordant pairs, the
+chi-square approximation with Yates' correction above that.
+
+**Why McNemar and not a two-proportion test.** With two arms scored on the same items, every item
+lands in one of four cells. The two concordant cells carry no information about which arm is better —
+an item both arms get right tells you the item was easy, not that the arms are equal. All the
+evidence is in the discordant cells, and McNemar conditions on exactly those. A two-proportion test
+would treat the concordant items as evidence and dilute a real effect with items that could never
+have shown it. `test_concordant_pairs_carry_no_evidence` asserts this directly: padding the sample
+with 500 items both arms get right leaves the p-value unchanged.
+
+**Why exact rather than chi-square by default.** With two similar models on a few hundred items,
+most items are concordant and the discordant count is routinely under 25 — which is precisely where
+the chi-square approximation is unreliable. Getting it wrong is worst exactly where it matters most.
+
+**Why implemented rather than imported.** scipy is the reason this service is in Python at all, but
+testing a scipy call against scipy proves nothing. The test suite checks our exact test against
+`scipy.stats.binomtest` across a 16×16 sweep of discordant splits, our chi-square against
+`scipy.stats.chi2.sf`, and our Benjamini-Hochberg against `scipy.stats.false_discovery_control`.
+scipy is a dev dependency only.
+
+**Consequence.** Counting a tie as success is the generous reading, biasing toward finding a cheap
+model acceptable. That is deliberate: D-004's `ci.low >= floor` rule pulls the other way, so the two
+controls are set against each other rather than compounding.

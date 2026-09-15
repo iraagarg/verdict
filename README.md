@@ -65,7 +65,7 @@ Response headers carry what Verdict did, so the body stays a byte-for-byte OpenA
 
 ```bash
 make install      # pnpm workspace + evald virtualenv (Python 3.12)
-make test         # 162 TypeScript tests, 250 Python tests
+make test         # 162 TypeScript tests, 314 Python tests
 make lint         # eslint, prettier, ruff
 make typecheck    # tsc --strict, mypy --strict
 ```
@@ -114,8 +114,8 @@ artifacts/       Committed benchmark output. The only source of any number.
 | P1    | Gateway: streaming proxy, adapters, traces, cost accounting    | done   |
 | P2    | Benchmark corpus + deterministic replay runner                 | done   |
 | P3    | LLM-as-judge + calibration against human labels (Cohen's κ)    | built  |
-| P4    | Paired bootstrap CIs, McNemar, regression-vs-noise verdicts    | next   |
-| P5    | Cascade router, threshold fitting, Pareto curve                |        |
+| P4    | Paired bootstrap CIs, McNemar, regression-vs-noise verdicts    | built  |
+| P5    | Cascade router, threshold fitting, Pareto curve                | next   |
 | P6    | Semantic cache with calibrated threshold; hit + false-hit rate |        |
 | P7    | Dashboard + GitHub Action PR comments                          |        |
 | P8    | Deploy, load test, README, demo                                |        |

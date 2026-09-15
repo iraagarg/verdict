@@ -21,6 +21,8 @@ dev = [
   "datasets>=3.0",
   "types-PyYAML>=6.0",
   "httpx2>=0.29",
+  "scipy>=1.14",
+  "scipy-stubs>=1.14",
   "mypy>=1.13",
   "ruff>=0.8",
 ]
@@ -45,7 +47,8 @@ select = ["E", "F", "I", "N", "UP", "B", "ANN", "RUF"]
 ignore = ["ANN401"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["ANN"]
+# N802: test names contain literal verdict strings (EQUIVALENT, REGRESSION).
+"tests/*" = ["ANN", "N802"]
 
 [tool.mypy]
 python_version = "3.12"
