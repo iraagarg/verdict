@@ -278,3 +278,58 @@ class TestCheapOnlyPilotMode:
         assert report["filter_mode"] == "drop_easy"
         assert report["pilot_models"] == ["openai/gpt-oss-120b", "openai/gpt-oss-20b"]
         assert {i.slug for i in kept} == {slugs[1], slugs[2]}
+
+
+class TestEmbeddingText:
+    """What gets embedded decides whether a cache threshold means anything."""
+
+    @staticmethod
+    def item(system: str, user: str) -> CorpusItem:
+        return CorpusItem(
+            slug="math_word_problem-0000",
+            task_type="math_word_problem",
+            split="test",
+            verifiable=True,
+            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+            ground_truth="4",
+            verifier="final_number",
+            source_dataset="nlile/hendrycks-MATH-benchmark",
+            source_id="1",
+            source_license="MIT",
+        )
+
+    def test_excludes_the_system_instruction(self) -> None:
+        # Every item of a task type carries the SAME instruction, so including
+        # it drags all pairwise similarities toward 1.0 and destroys the
+        # discrimination a cache threshold depends on.
+        shared = "Solve the problem. " * 20
+        text = self.item(shared, "What is 2+2?").user_prompt_text()
+        assert text == "What is 2+2?"
+        assert shared.strip() not in text
+
+    def test_two_items_sharing_an_instruction_are_not_made_similar(self) -> None:
+        shared = "Solve the problem and give the final answer as #### <answer>"
+        a = self.item(shared, "How many divisors does 196 have?").user_prompt_text()
+        b = self.item(shared, "What is the smallest perfect cube above 100?").user_prompt_text()
+        assert a != b
+        assert shared not in a and shared not in b
+
+    def test_full_prompt_text_still_includes_everything(self) -> None:
+        # The replay runner sends the whole thing; only EMBEDDING drops the system turn.
+        full = self.item("INSTRUCTION", "QUESTION").prompt_text()
+        assert "INSTRUCTION" in full and "QUESTION" in full
+
+    def test_falls_back_when_there_are_no_user_turns(self) -> None:
+        item = CorpusItem(
+            slug="summarization-0000",
+            task_type="summarization",
+            split="test",
+            verifiable=False,
+            messages=[{"role": "system", "content": "only this"}],
+            source_dataset="d",
+            source_id="1",
+            source_license="MIT",
+        )
+        # Better to embed something than the empty string, which would make
+        # every such request a duplicate of every other.
+        assert "only this" in item.user_prompt_text()

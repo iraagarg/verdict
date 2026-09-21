@@ -623,7 +623,9 @@ def cmd_cache_calibrate(args: argparse.Namespace) -> int:
     #: Only free-form and gradable PROMPTS matter here; the cache keys on the
     #: user's request, not on any answer.
     pool = sorted(items, key=lambda i: i.slug)[: args.n]
-    texts = {i.slug: i.prompt_text() for i in pool}
+    # User turns only: the shared system instruction is identical across a task
+    # type and would inflate every similarity (see user_prompt_text).
+    texts = {i.slug: i.user_prompt_text() for i in pool}
 
     embedder = LocalEmbedder(config.embedding.model, config.embedding.dimensions)
     cache = EmbeddingCache(args.embedding_cache)
@@ -728,6 +730,7 @@ def cmd_cache_calibrate(args: argparse.Namespace) -> int:
         no_threshold_reason=None
         if chosen
         else "see render(); no threshold was both safe and useful",
+        price_of_usefulness=[list(t) for t in curve.price_of_usefulness()],
         human_verified_pairs=sum(1 for p in read_pairs(Path(args.pairs)) if p.human_verified),
         notes=[
             "Negatives are HARD: each item paired with its nearest DIFFERENT neighbour. "

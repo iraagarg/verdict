@@ -64,6 +64,11 @@ class CacheCalibrationArtifact(BaseModel):
     chosen_false_hit_ci_high: float | None = None
     no_threshold_reason: str | None = None
 
+    #: (tolerance, best achievable hit rate, threshold) — quantifies what
+    #: loosening the safety bar would actually buy, so the tradeoff is a
+    #: reported number rather than an unexamined temptation.
+    price_of_usefulness: list[list[float]] = Field(default_factory=list)
+
     human_verified_pairs: int = 0
     notes: list[str] = Field(default_factory=list)
 

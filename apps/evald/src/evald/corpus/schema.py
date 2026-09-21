@@ -52,7 +52,20 @@ class CorpusItem(BaseModel):
             raise ValueError(f"{self.slug}: non-verifiable items must not carry ground truth")
 
     def prompt_text(self) -> str:
+        """Everything sent to the model, system instruction included."""
         return "\n\n".join(m["content"] for m in self.messages)
+
+    def user_prompt_text(self) -> str:
+        """Only the user turns — what actually distinguishes one request from another.
+
+        This is what gets embedded. Every item of a given task type carries the
+        same system instruction, so including it drags every pairwise similarity
+        toward 1.0 and destroys exactly the discrimination a cache threshold
+        depends on. The gateway's `embeddingText()` applies the same rule, and
+        the two must agree or a threshold fitted here would not transfer.
+        """
+        user = [m["content"] for m in self.messages if m.get("role") in ("user", "assistant")]
+        return "\n\n".join(user) if user else self.prompt_text()
 
 
 def corpus_sha256(items: list[CorpusItem]) -> str:

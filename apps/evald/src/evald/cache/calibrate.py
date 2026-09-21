@@ -82,6 +82,28 @@ class CalibrationCurve:
             return None
         return max(usable, key=lambda p: (p.hit_rate, -p.threshold))
 
+    def price_of_usefulness(self) -> list[tuple[float, float, float]]:
+        """What each tolerance buys: (tolerance, best hit rate, threshold).
+
+        "No safe threshold" is a true answer and an unsatisfying one. The useful
+        follow-up is not "should we loosen the rule?" but "what would loosening
+        it actually cost?" — so the tradeoff is quantified rather than left as a
+        temptation to quietly move the bar.
+        """
+        out: list[tuple[float, float, float]] = []
+        for tolerance in (0.01, 0.02, 0.03, 0.05, 0.10):
+            usable = [
+                p
+                for p in self.points
+                if p.false_hit_ci_high <= tolerance and p.hit_rate >= self.min_hit_rate
+            ]
+            if usable:
+                best = max(usable, key=lambda p: p.hit_rate)
+                out.append((tolerance, best.hit_rate, best.threshold))
+            else:
+                out.append((tolerance, 0.0, 0.0))
+        return out
+
     def render(self) -> str:
         lines = [
             "SEMANTIC CACHE CALIBRATION",
@@ -122,6 +144,18 @@ class CalibrationCurve:
                     f"that rarely hits still costs an embedding call and a vector search on "
                     f"every request, so it is worse than no cache."
                 )
+                lines += ["", "  WHAT A USEFUL CACHE WOULD COST on this corpus:"]
+                for tolerance, hit, thresh in self.price_of_usefulness():
+                    if hit > 0:
+                        lines.append(
+                            f"    accept up to {tolerance:>5.1%} wrong answers  ->  "
+                            f"{hit:>5.1%} hit rate at threshold {thresh:.3f}"
+                        )
+                    else:
+                        lines.append(
+                            f"    accept up to {tolerance:>5.1%} wrong answers  ->  "
+                            f"still no useful threshold"
+                        )
             else:
                 lines.append(
                     "  There is enough evidence, and every threshold fails it. The correct "

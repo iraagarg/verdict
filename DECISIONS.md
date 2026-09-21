@@ -1369,3 +1369,77 @@ tier.
 **The lesson worth stating.** A decision that rests on an unverified premise about the environment
 is a guess wearing a rationale. The premise ("we can call this API") was the cheapest thing in the
 whole decision to check, and checking it was skipped because the reasoning around it felt solid.
+
+---
+
+## D-050 — MEASURED: the semantic cache is unsafe on this corpus, and is not deployed
+
+**Status:** MEASURED · **Date:** 2026-09-22 · **Phase:** P6
+
+**The result.** Calibrated against 200 paraphrase positives and 600 hard negatives, embeddings from
+`BAAI/bge-small-en-v1.5`. **No threshold is both safe and useful** at a 1% false-hit tolerance, so
+the gateway serves no semantic cache.
+
+| Threshold | Hit rate | False-hit rate | CP upper bound | Acceptable    |
+| --------- | -------- | -------------- | -------------- | ------------- |
+| 0.850     | 51.0%    | 14.17%         | 17.22%         | no            |
+| 0.900     | 32.0%    | 3.33%          | 5.10%          | no            |
+| 0.950     | 12.0%    | 1.33%          | 2.61%          | no            |
+| 0.975     | 1.0%     | 0.33%          | 1.20%          | no            |
+| 1.000     | 0.0%     | 0.00%          | 0.61%          | safe, useless |
+
+**The tradeoff, priced rather than argued.** "No safe threshold" is true and unsatisfying, and it
+invites quietly moving the bar. So the calibration reports what moving it would buy:
+
+| Accept up to | Best hit rate | Threshold |
+| ------------ | ------------- | --------- |
+| 1% wrong     | none exists   | —         |
+| 2% wrong     | 8.0%          | 0.955     |
+| 5% wrong     | 28.0%         | 0.910     |
+| 10% wrong    | 43.5%         | 0.870     |
+
+**Why it fails here, which is the part that generalises.** This corpus is academic questions, and
+within a topic they are lexically near-identical while being semantically distinct. The hardest
+negative found:
+
+> How many ways are there to put 4 **distinguishable** balls into 2 **indistinguishable** boxes?
+> How many ways are there to put 4 **indistinguishable** balls into 2 **distinguishable** boxes?
+
+Two words swapped, different answers, cosine **0.9986**. No threshold separates that from a genuine
+paraphrase. A workload of distinct support tickets would very likely calibrate differently — the
+method transfers, this verdict does not, and the README says so.
+
+**What makes this a result rather than a failure.** The cache was built, measured against hard
+negatives with a bound that is correct at zero events, and rejected on the evidence. Reporting a
+"51% hit rate" at threshold 0.85 would have been trivially easy and would have concealed a 14%
+rate of confidently wrong answers.
+
+---
+
+## D-051 — The system prompt must not be embedded, and I did it anyway
+
+**Status:** ACCEPTED · **Date:** 2026-09-22 · **Phase:** P6
+
+**What happened.** `CorpusItem.prompt_text()` returns every message including the system
+instruction, and the first calibration embedded that. Every item of a given task type carries the
+same ~130-character instruction, so it inflated every pairwise similarity: the false-hit rate at
+threshold 0.85 read **45.8%** where it belonged at **14.2%**.
+
+The guard against exactly this already existed on the TypeScript side, in the gateway's
+`embeddingText()`, with a comment spelling out the reason — _"a shared system prompt is identical
+across every request in a route, so including it drags every similarity toward 1.0 and destroys the
+discrimination the threshold depends on."_ The same mistake then went into the Python calibration.
+
+**Decision.** `CorpusItem.user_prompt_text()` returns only user and assistant turns, matching
+`embeddingText()`. A threshold fitted on one and applied to the other would not transfer, so the two
+must agree; a test asserts the system instruction is excluded and that two items sharing an
+instruction are not made similar by it.
+
+**Why it was caught.** Not by review — by the number being implausible. A 45.8% false-hit rate at a
+moderate threshold was too bad to believe, which prompted looking at the most-similar negative pair,
+which showed two prompts sharing a long identical prefix. Reporting the false-hit rate at all is
+what made the bug visible; a hit-rate-only report would have shown 51% and looked fine.
+
+**The lesson.** Knowing a failure mode, documenting it, and writing a guard against it in one
+language does not prevent committing it in another. The defence that worked was not the comment —
+it was measuring the thing that would look wrong if the bug were present.

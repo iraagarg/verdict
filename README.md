@@ -73,13 +73,17 @@ Measured numbers are rare and expensive, so this section is explicit about which
 - Pilot pass rates across three tiers, 60 gradable items —
   [`difficulty-pilot.json`](artifacts/difficulty-pilot.json)
 - Two paired statistical verdicts — [`artifacts/verdict-*.json`](artifacts/)
-- Total spend to produce them: **$0.49**
+- Semantic cache calibration, 200 paraphrases against 600 hard negatives —
+  [`cache-calibration.json`](artifacts/cache-calibration.json)
+- Total spend to produce all of it: **$0.49** (the cache calibration cost nothing — local
+  embeddings, paraphrases on a free tier)
 
 **Built, tested, and not yet run against real data:**
 
 - The LLM judge and its calibration harness (needs ~200 hand labels)
 - The routing policy fit (needs judged replay runs)
-- The semantic near-duplicate cache (needs the corpus embedded and paraphrased)
+- The semantic cache's _live_ path. It is calibrated and the answer was "do not deploy", so the
+  gateway serves no semantic cache.
 
 **Not claimed:** any cost saving. The routing machinery works and is tested end to end, but the
 corpus has not been replayed at the scale needed to fit a policy worth deploying. A savings figure
@@ -152,6 +156,10 @@ make calibrate PAIRS=200    # judge them; writes calibration_report.json
 make fit                    # fit the routing policy
 ```
 
+```bash
+cd apps/evald && .venv/bin/python -m evald.cli cache-calibrate   # free: local embeddings
+```
+
 Every command that can spend money prints a projection and refuses to start without a cap. Results
 are written to a content-addressed cache, so a second run of an unchanged corpus makes **zero paid
 calls**.
@@ -174,7 +182,7 @@ optimisation happens only where there is positive evidence it is safe.
 
 ```bash
 make install      # pnpm workspace + evald virtualenv (Python 3.12)
-make test         # 211 TypeScript tests, 396 Python tests
+make test         # 211 TypeScript tests, 413 Python tests
 make lint         # eslint, prettier, ruff
 make typecheck    # tsc --strict, mypy --strict
 ```
@@ -193,10 +201,42 @@ oracle, plus against synthetic data with a planted effect. The second kind catch
 
 ---
 
-## The cache will not report a hit rate on its own
+## The semantic cache: measured, and rejected
 
-A cache that returns wrong answers quickly is worse than no cache, so the calibration reports the
-**false-hit rate** alongside the hit rate and neither can be read without the other.
+A near-duplicate cache reuses a previous answer when a new request means the same thing. It was
+built, calibrated against 200 paraphrase pairs and 600 hard negatives, and **the measurement says
+not to deploy it**.
+
+| Threshold | Hit rate | False-hit rate | Upper bound | Safe? |
+| --------- | -------- | -------------- | ----------- | ----- |
+| 0.850     | 51.0%    | 14.17%         | 17.22%      | no    |
+| 0.900     | 32.0%    | 3.33%          | 5.10%       | no    |
+| 0.950     | 12.0%    | 1.33%          | 2.61%       | no    |
+| 0.975     | 1.0%     | 0.33%          | 1.20%       | no    |
+
+At a 1% tolerance, no threshold is both safe and useful. Rather than stop at "no", the calibration
+prices the alternative:
+
+| Accept up to | Best hit rate | at threshold |
+| ------------ | ------------- | ------------ |
+| 1% wrong     | —             | none exists  |
+| 2% wrong     | 8.0%          | 0.955        |
+| 5% wrong     | 28.0%         | 0.910        |
+| 10% wrong    | 43.5%         | 0.870        |
+
+**Why it fails here is the interesting part.** This corpus is academic questions, and within a topic
+they are lexically near-identical while being semantically distinct. The hardest negative pair
+found:
+
+```
+How many ways are there to put 4 distinguishable balls into 2 indistinguishable boxes?
+How many ways are there to put 4 indistinguishable balls into 2 distinguishable boxes?
+```
+
+Two words swapped, different answers, cosine similarity **0.9986**. No threshold separates that from
+a genuine paraphrase, and serving one answer for the other is exactly the failure a cache must never
+make. A workload of distinct support tickets would likely calibrate very differently — the method
+transfers, this particular verdict does not.
 
 Two things that fell out of building it honestly:
 
