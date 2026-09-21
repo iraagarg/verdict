@@ -94,6 +94,8 @@ class Embedding(BaseModel):
 
     model: str | None
     dimensions: int | None
+    provider: Provider | None = None
+    pricing: Pricing | None = None
 
 
 class ModelConfig(BaseModel):

@@ -91,9 +91,11 @@ const ModelConfig = z
     version: z.literal(1),
     embedding: z
       .object({
-        /** Both null until chosen in P2. `dimensions` is migration-breaking (DECISIONS.md D-015). */
+        /** `dimensions` is migration-breaking (DECISIONS.md D-015). */
         model: z.string().min(1).nullable(),
         dimensions: z.number().int().positive().nullable(),
+        provider: z.enum(["anthropic", "openai", "groq"]).optional(),
+        pricing: Pricing.optional(),
       })
       .strict(),
     safe_default: z.string().min(1),

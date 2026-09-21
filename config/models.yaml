@@ -23,10 +23,22 @@
 version: 1
 
 # Embedding model for route clustering and the semantic cache.
-# Chosen in P2; `dimensions` is a migration-breaking constant (DECISIONS.md D-015).
+#
+# `dimensions` is a MIGRATION-BREAKING constant (DECISIONS.md D-015): changing it
+# means rewriting corpus_items.embedding, routes.centroid and
+# semantic_cache_entries.embedding, and rebuilding both HNSW indexes. Chosen in
+# D-044 and pinned by db/migrations/0003_vectors.sql.
 embedding:
-  model: null
-  dimensions: null
+  model: text-embedding-3-small
+  dimensions: 1536
+  provider: openai
+  pricing:
+    input: 0.02
+    output: 0.0 # embeddings return vectors, not tokens
+    cache_read: null
+    cache_write: null
+    verified_at: "2026-09-21"
+    source: "https://developers.openai.com/api/docs/pricing"
 
 # The rung a request falls back to whenever there is no positive evidence that
 # something cheaper is safe: no policy, out-of-distribution prompt, breaker open,

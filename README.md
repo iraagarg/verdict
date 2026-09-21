@@ -79,7 +79,7 @@ Measured numbers are rare and expensive, so this section is explicit about which
 
 - The LLM judge and its calibration harness (needs ~200 hand labels)
 - The routing policy fit (needs judged replay runs)
-- The semantic cache (needs an embedding model; not yet chosen)
+- The semantic near-duplicate cache (needs the corpus embedded and paraphrased)
 
 **Not claimed:** any cost saving. The routing machinery works and is tested end to end, but the
 corpus has not been replayed at the scale needed to fit a policy worth deploying. A savings figure
@@ -174,7 +174,7 @@ optimisation happens only where there is positive evidence it is safe.
 
 ```bash
 make install      # pnpm workspace + evald virtualenv (Python 3.12)
-make test         # 184 TypeScript tests, 354 Python tests
+make test         # 211 TypeScript tests, 396 Python tests
 make lint         # eslint, prettier, ruff
 make typecheck    # tsc --strict, mypy --strict
 ```
@@ -192,6 +192,30 @@ oracle, plus against synthetic data with a planted effect. The second kind catch
 (wrong arms compared, pairing lost, sign flipped) that agreeing with scipy cannot.
 
 ---
+
+## The cache will not report a hit rate on its own
+
+A cache that returns wrong answers quickly is worse than no cache, so the calibration reports the
+**false-hit rate** alongside the hit rate and neither can be read without the other.
+
+Two things that fell out of building it honestly:
+
+**The bootstrap is the wrong tool for a rare event.** Every other rate in this project uses a
+percentile bootstrap (D-011). Resample zero false hits out of 150 any number of times and every
+resample still contains zero, so the interval is `[0, 0]` — and the first calibration duly reported
+"0.00% false hits, upper bound 0.00%" for a threshold that had simply not been tested hard enough.
+Since the threshold is chosen _on that upper bound_, the cache would have been loosened on an
+artefact of the method. The false-hit rate now uses a Clopper-Pearson interval, verified against
+`scipy`: 0 of 150 is **2.43%**, not 0%.
+
+**A safety bound has a floor set by sample size, not by results.** Proving a false-hit rate under 1%
+needs at least **368 hard negatives even with zero observed false hits**. Below that, "0%" means
+untested. The calibration says so and refuses to pick a threshold rather than reporting a flattering
+number.
+
+Negatives are hard by construction — for each item, its nearest _different_ neighbour in embedding
+space. Random negatives from a 1,500-item corpus are trivially separable, so any threshold would
+look excellent while saying nothing about production.
 
 ## Deliberate non-goals
 

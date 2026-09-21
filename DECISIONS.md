@@ -1204,3 +1204,129 @@ cache hits, errors and an ETA every five tasks.
 to kill it, and a spend cap is no protection against a user who aborts a run they have already paid
 for. Spend is shown live for the same reason: the number that matters most should never require a
 database query to see.
+
+---
+
+## D-044 — Embedding model: `text-embedding-3-small`, D = 1536
+
+**Status:** ACCEPTED · **Date:** 2026-09-21 · **Phase:** P6 · **Resolves:** D-015
+
+**Decision.** `openai/text-embedding-3-small`, 1536 dimensions, pinned by
+`db/migrations/0003_vectors.sql` and recorded in `config/models.yaml` with its verified price.
+
+**Rationale.** Embeddings are effectively free: **$0.02 per million tokens**, so embedding the whole
+1,500-item corpus costs about **$0.008**. That removes cost as a deciding factor and leaves
+architecture, which is decisive — the TypeScript gateway can call this API directly, so the semantic
+cache works on the live hot path with no dependency on `evald` and no new service in the request
+chain.
+
+**Alternatives rejected.** _`text-embedding-3-large`_ — better retrieval, still trivially cheap
+(~$0.05 for the corpus), but 2× the index and 2× the vector storage for quality that near-duplicate
+detection does not need. _A local model (bge-small via fastembed)_ — free, deterministic, runs in CI
+with no key, and genuinely attractive; rejected because the gateway cannot run it, so the live cache
+would need a round-trip to `evald` on every request or would become offline-only like the cascade
+(D-040) and therefore save nothing in production.
+
+**Consequence.** D-015's migration-breaking constant is now fixed at 1536 across
+`corpus_items.embedding`, `routes.centroid` and `semantic_cache_entries.embedding`, with HNSW
+indexes on the latter two. Changing it later means rewriting three columns and rebuilding two
+indexes. It also unblocks D-039: route inference from prompt embeddings is now possible, so the
+gateway will no longer need an explicit `x-verdict-route` hint to give a request its discount.
+
+---
+
+## D-045 — Calibration pairs are auto-derived, with HARD negatives
+
+**Status:** ACCEPTED · **Date:** 2026-09-21 · **Phase:** P6
+
+**Decision.** Positives are LLM paraphrases of real corpus items (same question, different words).
+Negatives are, for each item, its **most similar different corpus item**. A human spot-checks a
+random sample rather than labelling the whole set.
+
+**Why hard negatives, specifically.** This is the part that decides whether the calibration means
+anything. Two prompts drawn at random from a 1,500-item corpus are almost never similar, so _any_
+threshold separates them and the resulting false-hit rate looks superb while saying nothing about
+production — where the dangerous cases are prompts that are close but not the same. Nearest-neighbour
+negatives are precisely the pairs sitting near the decision boundary, and they are the only ones
+carrying information about where to put it.
+
+**Why auto-derived.** Corpus items are distinct prompts by construction — assembly rejects duplicates
+(D-025) — so "these two are different questions" needs no human to establish. Iraa's labelling time
+is the scarcest resource in the project and P3 already claims 4–6 hours of it; spending more of it
+confirming that two unrelated questions are unrelated would be waste. The spot-check exists because
+the _positives_ are model-generated and could drift in meaning, which nothing else would reveal.
+
+---
+
+## D-046 — Threshold chosen on the false-hit UPPER bound, and it must also be useful
+
+**Status:** ACCEPTED · **Date:** 2026-09-21 · **Phase:** P6
+
+**Decision.** Pick the threshold with the best hit rate among those that are **provably safe** (the
+false-hit rate's confidence upper bound is within tolerance, default 1%) **and useful** (hit rate at
+or above 5%). If none qualifies, choose nothing and run no semantic cache.
+
+**Rationale.** Judging safety on the upper bound rather than the point estimate mirrors D-004's
+routing rule, which demotes a route only on a lower bound. Both err the same way: a small or noisy
+sample refuses to loosen the cache rather than loosening it on luck. A false hit returns a
+confidently wrong answer to a question nobody asked, so uncertainty has to cost hits, never safety.
+
+**The usefulness floor was added because a test caught the gap.** With safety as the only criterion,
+the selector happily chose a threshold so strict that nothing ever hit it — technically safe, and
+worthless. A cache that rarely hits still costs an embedding call and a vector search on every
+request, so it is strictly worse than no cache. "Safe" is necessary and not sufficient.
+
+**Alternatives rejected.** _Maximise `hit_rate − k × false_hit_rate`_ — one clean optimum, but it
+buries the safety tradeoff in a penalty weight nobody can justify, and will accept a worse false-hit
+rate whenever the hit rate rises enough to pay for it. _Fix a conservative constant like 0.97_ —
+easy to defend against overfitting, but leaves real hits on the table for no measured reason, and "I
+picked 0.97 because it felt safe" is a weaker answer than "I picked the loosest threshold whose
+false-hit rate I could bound under 1%".
+
+---
+
+## D-047 — Clopper-Pearson for the false-hit bound, because the bootstrap is wrong at zero
+
+**Status:** ACCEPTED · **Date:** 2026-09-21 · **Phase:** P6 · **Amends:** D-011
+
+**The bug, found in this project's own code.** D-011 established the percentile bootstrap for every
+rate in the project. That is right for a mid-range proportion and **wrong for a rare event**:
+resample 0 successes out of 150 any number of times and every resample still contains 0, so the
+interval is `[0, 0]`. The first calibration run duly reported a false-hit rate of "0.00% with an
+upper bound of 0.00%" for a threshold that had merely not been tested hard enough. Since D-046
+chooses the threshold _on that upper bound_, the cache would have been loosened on the strength of
+an artefact of the method.
+
+**Decision.** The false-hit rate specifically uses a Clopper-Pearson interval, implemented by
+inverting the binomial test and verified against `scipy.stats.beta.ppf` across the full range
+including both boundaries. 0 of 150 becomes **2.43%**, not 0%. The hit rate keeps the bootstrap,
+which is appropriate for a mid-range proportion and consistent with the rest of the project.
+
+**The consequence is a result in itself.** A safety bound has a floor set by sample size rather than
+by observations: proving a false-hit rate under 1% needs **at least 368 hard negatives even with zero
+observed false hits** (the rule of three, ~3/n). Below that, "0%" means "untested", not "safe", and
+the calibration says so explicitly instead of choosing a threshold.
+
+---
+
+## D-048 — Prompt version is part of the cache KEY, not a field on the row
+
+**Status:** ACCEPTED · **Date:** 2026-09-21 · **Phase:** P6
+
+**Decision.** Both caches key on `(canonicalised messages, model, prompt_version, params)`. Bumping
+the prompt version makes every prior entry unreachable. `invalidatePromptVersion` additionally
+deletes them.
+
+**Rationale.** A cached answer is valid only for the prompt that produced it, and **nothing about a
+stored response reveals that the prompt behind it has changed** — the text still looks like a
+perfectly good answer. Storing the version as a field to be checked would make correctness depend on
+every read path remembering to check it; putting it in the key makes stale entries unreachable by
+construction, which fails closed. The model is in the key for the same reason: two models answering
+the same question give different answers, and serving one for the other is a false hit dressed up as
+a cache design.
+
+**Two related details, both tested.** Only _user_ and _assistant_ turns are embedded: a shared system
+prompt is identical across every request in a route, so including it drags every similarity toward
+1.0 and destroys the discrimination the threshold depends on — and the system prompt is already
+accounted for by `prompt_version`. And TTL is stored as an absolute `expires_at` filtered in SQL,
+not as a duration, so a lapsed entry can never be served even if the sweeper has not run.

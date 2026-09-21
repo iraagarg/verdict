@@ -20,6 +20,10 @@ logs: ## Tail logs from all services
 	docker compose logs -f
 
 test: ## Run every test suite (this is what CI runs)
+	# Build first: the gateway imports @verdict/shared from dist, so a source
+	# change there is invisible to the tests until it is compiled. CI builds
+	# explicitly, and the local loop must not differ from CI.
+	pnpm --filter @verdict/shared build
 	pnpm -r test
 	cd apps/evald && .venv/bin/python -m pytest -q
 
