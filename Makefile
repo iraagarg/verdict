@@ -1,4 +1,4 @@
-.PHONY: help install dev up down logs test lint typecheck fmt migrate corpus plan pilot label calibrate bench clean
+.PHONY: help install dev up down logs test lint typecheck fmt migrate corpus plan pilot label calibrate traces dash bench clean
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -23,7 +23,7 @@ test: ## Run every test suite (this is what CI runs)
 	# Build first: the gateway imports @verdict/shared from dist, so a source
 	# change there is invisible to the tests until it is compiled. CI builds
 	# explicitly, and the local loop must not differ from CI.
-	pnpm --filter @verdict/shared build
+	pnpm --filter @verdict/shared build && pnpm --filter @verdict/ghapp build
 	pnpm -r test
 	cd apps/evald && .venv/bin/python -m pytest -q
 
@@ -59,6 +59,12 @@ label: ## Hand-label sampled pairs for judge calibration (blind, resumable, free
 calibrate: ## Judge the labelled pairs and write calibration_report.json
 	cd apps/evald && .venv/bin/python -m evald.cli calibrate --pairs $(PAIRS) --judge-model $(JUDGE)
 
+traces: ## Export a stratified trace sample for the dashboard (free)
+	./tools/export-traces.sh $(PER_MODEL)
+
+dash: ## Build and serve the dashboard locally
+	pnpm --filter @verdict/dashboard build && pnpm --filter @verdict/dashboard start
+
 bench: ## Run the full replay and write a versioned artifact. Re-runs are free.
 	@test -n "$(CAP)" || (echo "refusing to run without a spend cap: make bench CAP=30" && exit 1)
 	cd apps/evald && .venv/bin/python -m evald.cli replay run --cap $(CAP)
@@ -72,4 +78,5 @@ clean: ## Remove build outputs and virtualenvs
 CAP ?= 5
 N ?= 200
 PAIRS ?= 200
+PER_MODEL ?= 60
 JUDGE ?= claude-opus-5

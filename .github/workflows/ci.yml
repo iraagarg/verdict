@@ -37,7 +37,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Build workspace packages
-        run: pnpm --filter @verdict/shared build
+        run: pnpm --filter @verdict/shared build && pnpm --filter @verdict/ghapp build
 
       - name: Lint
         run: pnpm lint

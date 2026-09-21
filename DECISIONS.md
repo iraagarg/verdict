@@ -1443,3 +1443,89 @@ what made the bug visible; a hit-rate-only report would have shown 51% and looke
 **The lesson.** Knowing a failure mode, documenting it, and writing a guard against it in one
 language does not prevent committing it in another. The defence that worked was not the comment —
 it was measuring the thing that would look wrong if the bug were present.
+
+---
+
+## D-052 — The dashboard reads committed artifacts, never a database
+
+**Status:** ACCEPTED · **Date:** 2026-09-22 · **Phase:** P7
+
+**Decision.** Every page reads JSON from `artifacts/`. Traces come from
+`artifacts/traces-sample.json`, exported by `tools/export-traces.sh`. The dashboard has no database
+connection, no connection string and no secrets.
+
+**Rationale.** The site builds fully statically, deploys anywhere, and **cannot break during a demo
+because there is nothing live to break**. That matters more here than freshness: this is a portfolio
+artifact whose job is to be open on someone else's screen while they ask questions.
+
+It also keeps the project's central rule visible in the product. Every figure on the dashboard comes
+from a file that is committed and diffable, so "a number that is not in an artifact does not exist"
+is enforced by the architecture rather than by discipline.
+
+**Consequence, and how it is handled.** Traces are a snapshot, not a live feed, and every page that
+shows them says so in its own text rather than implying otherwise.
+
+**A sampling bug worth recording.** The first export took the 200 most recent traces and returned
+200 rows from a single model, because the last thing to run was paraphrase generation on one cheap
+rung. Real data, and completely unrepresentative. Sampling is now stratified — N per model — which
+gave 240 rows evenly across all four.
+
+---
+
+## D-053 — Streaming replay is reconstructed, and says so
+
+**Status:** ACCEPTED · **Date:** 2026-09-22 · **Phase:** P7
+
+**Decision.** The trace explorer replays a response by waiting the recorded `ttft_ms`, then emitting
+at the measured average rate `output_tokens / (latency_ms − ttft_ms)`. The UI states it is
+reconstructed from two measured timings, not a per-token recording.
+
+**Rationale.** Both numbers are real and per-trace, so the overall shape is honest; within-stream
+jitter is smoothed away, and pretending otherwise would be the dashboard telling a small lie about
+its own precision — in a project whose entire argument is that it does not do that.
+
+**Alternative rejected.** Capturing per-token arrival times in the gateway would make the replay
+faithful. It changes P1's hot path, adds a per-token array to every trace row, and none of the
+existing 1,142 traces have it — so the explorer would show nothing until new traffic was generated.
+Not worth it for a visual nicety.
+
+---
+
+## D-054 — Both integrations: the Action runs, the App's security is real
+
+**Status:** ACCEPTED · **Date:** 2026-09-22 · **Phase:** P7 · **Amends:** D-005
+
+**Decision.** `.github/workflows/pr-eval.yml` is what actually runs on pull requests.
+`apps/ghapp` implements the webhook receiver, with signature verification, replay protection and the
+comment renderer, as a tested service.
+
+**Both share ONE comment renderer.** The Action shells out to `apps/ghapp/dist/cli.js` rather than
+reimplementing the markdown. Two renderers would drift, and the drift would be invisible because
+both outputs look plausible — the same reasoning that put replay behind the gateway (D-024) and that
+made `user_prompt_text()` match `embeddingText()` (D-051).
+
+**What D-005 got right and what changed.** D-005's objection stands: the App needs a public HTTPS
+endpoint and cannot be demonstrated from a laptop, so it is not what runs today. What it undervalued
+is that the signature verification is the most security-relevant code in the project and is worth
+having as real, tested code rather than a paragraph saying it would be straightforward.
+
+**The security details that are the point of the exercise:**
+
+- The **raw bytes** are verified, never a re-serialised object. `JSON.parse` then `JSON.stringify`
+  can reorder keys and change escaping, which changes the HMAC — so a valid payload fails, and the
+  tempting "fix" is to weaken the check.
+- **Verify before parse.** The endpoint is public; parsing first runs untrusted input through a
+  parser for anyone who can send a POST.
+- **`timingSafeEqual`, and shape-validate first.** A plain `===` leaks how many leading characters
+  matched. And `timingSafeEqual` _throws_ on a length mismatch, so the digest is regex-checked for
+  length and hex-ness first — otherwise the throw is itself an oracle for the expected length.
+- **Replay protection.** A signature is valid forever, so a captured delivery can be resent and is
+  indistinguishable by signature alone. Delivery ids are tracked in a **bounded** log with a TTL,
+  because an unbounded set of ids is a memory leak whose size an attacker controls. It also makes
+  GitHub's own retries idempotent.
+- **No secret means no verification, not no checking.** An empty secret returns
+  `missing_secret`, never a pass.
+
+**Cost control, in both paths.** Only PRs touching `prompts/**` trigger a run. The Action caps spend,
+caches replay responses across runs so an unchanged prompt costs $0 after the first, and updates its
+own comment in place rather than posting a new one on every push.

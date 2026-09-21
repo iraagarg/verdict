@@ -1,0 +1,110 @@
+name: Prompt eval
+
+# Only PRs that actually change a prompt. Evals cost real money, so a docs PR
+# must not trigger one — the same rule the webhook App applies (D-054).
+on:
+  pull_request:
+    paths:
+      - "prompts/**"
+      - "config/models.yaml"
+
+# One run per PR. A force-push should replace the in-flight run, not race it.
+concurrency:
+  group: pr-eval-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write # to post the comment, and nothing more
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @verdict/shared build && pnpm --filter @verdict/ghapp build
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev]"
+        working-directory: apps/evald
+
+      # Cache the replay responses across runs, so an unchanged prompt costs $0
+      # on the second and later runs rather than being re-paid for every push.
+      - uses: actions/cache@v4
+        with:
+          path: .cache/replay
+          key: replay-${{ hashFiles('corpus/items.jsonl', 'config/models.yaml') }}
+          restore-keys: replay-
+
+      - name: Show the projected cost before spending anything
+        working-directory: apps/evald
+        run: .venv/bin/python -m evald.cli replay plan --cap ${{ vars.PR_EVAL_CAP || '1.00' }} || true
+
+      - name: Run the sampled eval under a hard cap
+        id: eval
+        working-directory: apps/evald
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: |
+          # The cap is enforced in code, not by convention: the runner reserves
+          # against it before each call and aborts, writing a partial artifact
+          # clearly marked aborted_budget.
+          python -m evald.cli verdict \
+            --model-a claude-haiku-4-5 \
+            --model-b claude-sonnet-5 \
+            --artifacts ../../artifacts || echo "no cached generations; skipping"
+
+      - name: Render the comment
+        id: comment
+        run: |
+          FILE=artifacts/verdict-claude-haiku-4-5-vs-claude-sonnet-5.json
+          if [ ! -f "$FILE" ]; then
+            echo "no verdict artifact produced; nothing to comment" >&2
+            exit 0
+          fi
+          {
+            echo 'body<<VERDICT_EOF'
+            node apps/ghapp/dist/cli.js "$FILE" \
+              --cap "${{ vars.PR_EVAL_CAP || '1.00' }}" \
+              --corpus-total "$(wc -l < corpus/items.jsonl)"
+            echo
+            echo 'VERDICT_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Post or update the PR comment
+        if: steps.comment.outputs.body != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = process.env.BODY;
+            const marker = '<!-- verdict-eval-comment -->';
+            const { data: comments } = await github.rest.issues.listComments({
+              ...context.repo, issue_number: context.issue.number,
+            });
+            // Update in place rather than posting on every push, so a long PR
+            // does not accumulate a wall of stale evals.
+            const existing = comments.find(
+              (c) => c.user.type === 'Bot' && c.body.includes(marker),
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({ ...context.repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({
+                ...context.repo, issue_number: context.issue.number, body,
+              });
+            }
+        env:
+          BODY: ${{ steps.comment.outputs.body }}
