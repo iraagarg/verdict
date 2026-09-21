@@ -1,0 +1,37 @@
+{
+  "alpha": 0.05,
+  "artifact_version": 1,
+  "baseline": "claude-haiku-4-5",
+  "baseline_rate": 0.816667,
+  "can_demonstrate_equivalence": false,
+  "candidate": "claude-sonnet-5",
+  "candidate_rate": 0.816667,
+  "ci_high": 0.1,
+  "ci_low": -0.1,
+  "corpus_sha256": "8eba2f9a070b0f525a3dd4c49aec8d05c3078b59cfdb6b1a36196f441503ccea",
+  "created_at": "2026-09-21T13:57:18+00:00",
+  "effect": 0.0,
+  "excluded": {
+    "missing_generation": 1140
+  },
+  "family_size": null,
+  "git_sha": "71d3bba85a5c236b7fcddd4096e8db0e5ab0c3d2",
+  "judge_model": "(none - verifier correctness)",
+  "margin": 0.03,
+  "mcnemar_method": "exact",
+  "mcnemar_p": 1.0,
+  "minimum_detectable_effect": 0.1,
+  "n": 60,
+  "n_concordant": 52,
+  "n_discordant": 8,
+  "notes": [
+    "Metric is VERIFIER CORRECTNESS (exact match against ground truth), not the judge's win-or-tie. Different measurement from D-003's; no judge or human labels are involved.",
+    "Gradable slice only. Free-form items have no exact verifier."
+  ],
+  "outcome": "INCONCLUSIVE",
+  "q_value": null,
+  "reference_model": "claude-opus-5",
+  "rubric_version": "(none)",
+  "seed": 20260915,
+  "statistically_significant": false
+}

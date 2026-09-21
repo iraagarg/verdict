@@ -1,33 +1,38 @@
 {
   "discriminative_by_task": {
-    "multiple_choice": 1
+    "math_word_problem": 9,
+    "multiple_choice": 11
   },
   "filter_mode": "discriminative",
   "gradable_before": 1200,
-  "gradable_discriminative": 1,
-  "gradable_piloted": 12,
+  "gradable_discriminative": 20,
+  "gradable_piloted": 60,
   "item_outcomes": {
-    "all_models_failed": 2,
-    "all_models_passed": 9,
-    "models_disagreed": 1
+    "all_models_failed": 6,
+    "all_models_passed": 34,
+    "models_disagreed": 20
   },
   "pass_rate_by_model": {
-    "claude-haiku-4-5": 0.75,
-    "openai/gpt-oss-20b": 0.8333
+    "claude-haiku-4-5": 0.8167,
+    "claude-sonnet-5": 0.8167,
+    "openai/gpt-oss-20b": 0.6333
   },
   "pass_rate_by_model_and_task": {
     "claude-haiku-4-5|math_word_problem": 0.8333,
-    "claude-haiku-4-5|multiple_choice": 0.6667,
-    "openai/gpt-oss-20b|math_word_problem": 0.8333,
-    "openai/gpt-oss-20b|multiple_choice": 0.8333
+    "claude-haiku-4-5|multiple_choice": 0.8,
+    "claude-sonnet-5|math_word_problem": 0.8,
+    "claude-sonnet-5|multiple_choice": 0.8333,
+    "openai/gpt-oss-20b|math_word_problem": 0.6333,
+    "openai/gpt-oss-20b|multiple_choice": 0.6333
   },
   "pilot_models": [
     "claude-haiku-4-5",
+    "claude-sonnet-5",
     "openai/gpt-oss-20b"
   ],
   "piloted_by_task": {
-    "math_word_problem": 6,
-    "multiple_choice": 6
+    "math_word_problem": 30,
+    "multiple_choice": 30
   },
-  "removed_as_uninformative": 11
+  "removed_as_uninformative": 40
 }

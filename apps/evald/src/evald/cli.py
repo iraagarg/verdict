@@ -45,6 +45,7 @@ from evald.replay.plan import TOKEN_ESTIMATE_METHOD, compare_projection, project
 from evald.replay.ratelimit import NullRateLimiter, RateLimiter
 from evald.replay.runner import Progress, build_tasks, request_params, run_replay, summarise
 from evald.router.fit import FIT_SPLIT, REPORT_SPLIT, fit_and_report
+from evald.stats.report import to_artifact
 from evald.stats.verdict import compare_runs
 
 DEFAULT_CORPUS = Path("../../corpus/items.jsonl")
@@ -566,10 +567,33 @@ def cmd_verdict(args: argparse.Namespace) -> int:
         label_candidate=args.model_b,
     )
     print(verdict.summary())
+
+    # Non-negotiable #1: a number that is not in a committed artifact does not
+    # exist. Terminal output is not evidence.
+    artifact = to_artifact(
+        verdict,
+        created_at=now_iso(),
+        git_sha=git_sha(),
+        corpus_sha256=corpus_sha256(items),
+        judge_model="(none - verifier correctness)",
+        rubric_version="(none)",
+        reference_model=config.reference_model,
+        excluded={"missing_generation": missing},
+        notes=[
+            "Metric is VERIFIER CORRECTNESS (exact match against ground truth), not the "
+            "judge's win-or-tie. Different measurement from D-003's; no judge or human "
+            "labels are involved.",
+            "Gradable slice only. Free-form items have no exact verifier.",
+        ],
+    )
+    slug = f"{args.model_a}-vs-{args.model_b}".replace("/", "_")
+    out = artifact.write(Path(args.artifacts) / f"verdict-{slug}.json")
     print("\n  metric        verifier correctness (exact match), NOT judge win-or-tie")
     print(f"  items paired  {len(paired_a)} of {sum(1 for i in items if i.verifiable)} gradable")
     if missing:
         print(f"  skipped       {missing} items lacking a cached generation for one side")
+    print(f"  artifact      {out}")
+    print(f"  artifact      {out}")
     return 0
 
 
@@ -688,6 +712,7 @@ def build_parser() -> argparse.ArgumentParser:
     vd.add_argument("--model-b", required=True, help="candidate")
     vd.add_argument("--max-tokens", type=int, default=2048)
     vd.add_argument("--margin", type=float, default=0.03)
+    vd.add_argument("--artifacts", type=Path, default=DEFAULT_ARTIFACTS)
     vd.set_defaults(func=cmd_verdict)
 
     return p

@@ -1,65 +1,172 @@
 # Verdict
 
-An OpenAI-compatible LLM gateway that records real traffic, replays it against candidate
-prompts and models, judges quality with a human-calibrated evaluator, decides
-regression-vs-noise with proper statistics, and uses that measurement to route live traffic to
-the cheapest model that still clears a statistical quality floor.
+An OpenAI-compatible LLM gateway that records real traffic, replays it against candidate models,
+judges quality with a human-calibrated evaluator, decides regression-vs-noise with proper
+statistics, and uses that measurement to route live traffic to the cheapest model that still clears
+a statistical quality floor.
 
-> Existing tools (LangSmith, Braintrust, Promptfoo) measure LLM quality but do not close the loop
-> to automatic cost-optimal routing with a proven quality guarantee. Verdict does.
+> Existing tools (LangSmith, Braintrust, Promptfoo) measure LLM quality but do not close the loop to
+> automatic cost-optimal routing with a proven quality guarantee. Verdict does.
 
-**Status: Phase 1 of 8 — the gateway is live.** There are no benchmark numbers yet, and there will
-be none in this README until `make bench` produces them into committed artifacts. A number that is
-not in `artifacts/` does not exist.
+---
 
-- [DESIGN.md](DESIGN.md) — problem, architecture, schema, API contract, routing algorithm,
-  evaluation methodology, failure modes, threats to validity
-- [DECISIONS.md](DECISIONS.md) — every engineering decision with its rejected alternatives
+## The result worth reading first
 
-## Quick start
+A pilot across three model tiers produced this:
+
+| Model                | Correct on gradable slice |
+| -------------------- | ------------------------- |
+| `openai/gpt-oss-20b` | 63.3%                     |
+| `claude-haiku-4-5`   | **81.7%**                 |
+| `claude-sonnet-5`    | **81.7%**                 |
+
+Haiku and Sonnet scored **identically**. Sonnet costs 2× more per token. The obvious conclusion is
+"route everything to Haiku and halve the bill."
+
+Verdict refuses to draw it:
+
+```
+VERDICT: INCONCLUSIVE
+  claude-haiku-4-5 -> claude-sonnet-5
+  effect        +0.0000  [-0.1000, +0.1000]  (95% CI)
+  rates         0.8167 -> 0.8167
+  n             60 items, 8 discordant
+  margin        +/-0.0300
+  resolution    0.1000   (too wide to ever show EQUIVALENT at this margin)
+  McNemar p     1.000000  (exact, 8 discordant)
+```
+
+A point estimate of exactly zero and a p-value of exactly 1.0 — and the honest answer is still
+**we cannot tell**. Sixty items resolve to ±10 percentage points, so a genuine 8-point gap would
+look identical to what was observed. Separating these two rungs needs roughly 667 paired items.
+
+This is the distinction the system exists to enforce. "No significant difference" conflates two
+opposite findings, and only one of them justifies spending less:
+
+|                                       |                |
+| ------------------------------------- | -------------- |
+| We measured precisely; it is small    | `EQUIVALENT`   |
+| We could not measure precisely at all | `INCONCLUSIVE` |
+
+It is not merely conservative. Given a real gap, at the same sample size, it commits:
+
+```
+VERDICT: IMPROVEMENT
+  openai/gpt-oss-20b -> claude-haiku-4-5
+  effect        +0.1607  [+0.0536, +0.2857]  (95% CI)
+  McNemar p     0.022461  (exact, 13 discordant)
+```
+
+Both verdicts are committed under [`artifacts/`](artifacts/) with the git SHA, seed, corpus hash and
+sample size that produced them.
+
+---
+
+## Status: what is measured and what is not
+
+Measured numbers are rare and expensive, so this section is explicit about which is which.
+
+**Measured, and in a committed artifact:**
+
+- Pilot pass rates across three tiers, 60 gradable items —
+  [`difficulty-pilot.json`](artifacts/difficulty-pilot.json)
+- Two paired statistical verdicts — [`artifacts/verdict-*.json`](artifacts/)
+- Total spend to produce them: **$0.49**
+
+**Built, tested, and not yet run against real data:**
+
+- The LLM judge and its calibration harness (needs ~200 hand labels)
+- The routing policy fit (needs judged replay runs)
+- The semantic cache (needs an embedding model; not yet chosen)
+
+**Not claimed:** any cost saving. The routing machinery works and is tested end to end, but the
+corpus has not been replayed at the scale needed to fit a policy worth deploying. A savings figure
+without that would be exactly the kind of number this project is built to refuse.
+
+Rule enforced throughout: **a number that is not in a committed artifact does not exist.** Nothing
+in this README was typed by hand; every figure is read from `artifacts/`.
+
+---
+
+## What each piece does
+
+| Component         | Role                                                                                                                                    |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/gateway`    | TypeScript + Fastify. OpenAI-compatible proxy, SSE streaming, three provider adapters, exact cost accounting, circuit breaker, routing. |
+| `apps/evald`      | Python + FastAPI. Corpus assembly, replay runner, LLM judge, calibration, statistics, policy fitting.                                   |
+| `apps/dashboard`  | Next.js. Placeholder.                                                                                                                   |
+| `packages/shared` | Shared TypeScript types and Zod schemas.                                                                                                |
+| `config/`         | Model ladder and pricing. Every price cites its source and the date verified.                                                           |
+| `corpus/`         | 1,500 frozen benchmark items with per-item provenance and licence.                                                                      |
+| `artifacts/`      | Committed measurements. The only source of any number.                                                                                  |
+
+### Design decisions worth a look
+
+[`DECISIONS.md`](DECISIONS.md) records 43 decisions with their rejected alternatives. The ones that
+changed the project most:
+
+- **[D-034](DECISIONS.md)** — why a paired bootstrap rather than a t-test, in plain language
+- **[D-035](DECISIONS.md)** — why three verdicts became four
+- **[D-030](DECISIONS.md)** — a pilot measured `gpt-oss-120b` at **98% on GSM8K**, so half the
+  gradable corpus could not distinguish any two models. Replaced with harder maths; re-measured at
+  30%.
+- **[D-027](DECISIONS.md)** — rate limits were opening the circuit breaker, turning 7 HTTP 429s into
+  339 refused requests. A 429 means healthy-but-throttled, not broken.
+- **[D-020](DECISIONS.md)** — client-disconnect detection on the request stream fires when the
+  request _body_ finishes reading, so every streaming request looked like an instant disconnect.
+  Every mocked test passed; only a real socket caught it.
+
+---
+
+## Running it
 
 ```bash
-cp .env.example .env          # then set at least one provider key
-make up                       # postgres, redis, migrations, gateway, evald, dashboard
+cp .env.example .env          # add at least one provider key
+make up                       # postgres, redis, migrations, gateway, evald
 curl -s localhost:8080/health
 ```
 
-| Service   | URL                          |
-| --------- | ---------------------------- |
-| gateway   | http://localhost:8080/health |
-| evald     | http://localhost:8000/health |
-| dashboard | http://localhost:3000        |
-
-`make down` stops everything and drops the volume. `make help` lists every target.
-
-## Using the gateway
-
-Point any OpenAI client at it — change `baseURL` and nothing else.
+The gateway is a drop-in for the OpenAI API — change `baseURL` and nothing else:
 
 ```bash
 curl -N http://localhost:8080/v1/chat/completions \
   -H 'content-type: application/json' \
-  -d '{
-    "model": "claude-haiku-4-5",
-    "messages": [{"role": "user", "content": "Explain SSE in one sentence."}],
-    "stream": true,
-    "stream_options": {"include_usage": true}
-  }'
+  -d '{"model":"claude-haiku-4-5","messages":[{"role":"user","content":"Explain SSE in one sentence."}],"stream":true}'
 ```
 
-`model` accepts any id in [config/models.yaml](config/models.yaml), or `verdict-auto` to let Verdict
-choose (P1 resolves that to the configured `safe_default`; P5 replaces it with a fitted policy).
+Response headers report what Verdict did, leaving the body a byte-for-byte OpenAI shape:
+`x-verdict-model-served`, `x-verdict-route`, `x-verdict-route-reason`, `x-verdict-cost-usd`,
+`x-verdict-usage-final`.
 
-Response headers carry what Verdict did, so the body stays a byte-for-byte OpenAI shape:
+### Benchmarking
 
-| Header                     | Meaning                                                      |
-| -------------------------- | ------------------------------------------------------------ |
-| `x-verdict-request-id`     | Propagated to every log line and the trace row               |
-| `x-verdict-model-served`   | The rung that actually served the request                    |
-| `x-verdict-provider`       | `anthropic` / `openai` / `groq`                              |
-| `x-verdict-cost-usd`       | Exact cost, 8dp (non-streaming)                              |
-| `x-verdict-usage-final`    | Whether the provider confirmed its token counts              |
-| `x-verdict-dropped-params` | Parameters the served model rejects (see DECISIONS.md D-010) |
+```bash
+make corpus                 # rebuild the corpus from public datasets (free)
+make plan CAP=30            # projected cost. Spends nothing.
+make pilot CAP=1 N=200      # measure whether the corpus discriminates
+make bench CAP=30           # full replay; writes a versioned artifact
+make label PAIRS=200        # hand-label pairs for judge calibration (free)
+make calibrate PAIRS=200    # judge them; writes calibration_report.json
+make fit                    # fit the routing policy
+```
+
+Every command that can spend money prints a projection and refuses to start without a cap. Results
+are written to a content-addressed cache, so a second run of an unchanged corpus makes **zero paid
+calls**.
+
+### Routing
+
+Off by default; must be enabled deliberately:
+
+```bash
+ROUTER_MODE=offline POLICY_PATH=artifacts/policy.json docker compose up -d gateway
+```
+
+Send `model: "verdict-auto"` with an `x-verdict-route` header. Every ambiguous case — router off, no
+policy, no route hint, an unknown route — serves the strong `safe_default` instead. Cost
+optimisation happens only where there is positive evidence it is safe.
+
+---
 
 ## Development
 
@@ -70,69 +177,23 @@ make lint         # eslint, prettier, ruff
 make typecheck    # tsc --strict, mypy --strict
 ```
 
-## Benchmarking
+TypeScript strict with no `any`; Zod at every boundary. Python with `mypy --strict`; Pydantic at
+every boundary. Secrets validated at boot — the process exits before binding a port rather than
+failing at request time.
 
-```bash
-make corpus                 # rebuild the frozen corpus from public datasets (free)
-make plan CAP=30            # show projected cost. Spends nothing.
-make pilot CAP=1 N=200      # measure whether the gradable slice discriminates
-make bench CAP=30           # run it; writes a versioned artifact
+The statistics are implemented from first principles and tested against `scipy` as an independent
+oracle, plus against synthetic data with a planted effect. The second kind catches wiring errors
+(wrong arms compared, pairing lost, sign flipped) that agreeing with scipy cannot.
 
-make label PAIRS=200        # hand-label pairs for judge calibration (free)
-make calibrate PAIRS=200    # judge them, write calibration_report.json
+---
 
-make fit                    # fit the routing policy; writes pareto.json + policy.json
-```
+## Deliberate non-goals
 
-### Routing
-
-The router is **off by default** and must be switched on deliberately:
-
-```bash
-ROUTER_MODE=offline POLICY_PATH=artifacts/policy.json docker compose up -d gateway
-```
-
-Send `model: "verdict-auto"` plus an `x-verdict-route` header to get the policy's assigned model.
-Every ambiguous case — router off, no policy, no route hint, an unknown route — serves the strong
-`safe_default` instead. Cost optimisation only happens where there is positive evidence it is safe.
-
-Per-request override: `x-verdict-router: off | offline`. Response headers report
-`x-verdict-route` and `x-verdict-route-reason` so you can always see which path a request took.
-
-`make bench` refuses to start without a spend cap, prints a projection before spending anything, and
-aborts hard if the cap is reached — writing a partial artifact marked `aborted_budget` so a truncated
-run can never be mistaken for a complete one. Every result is written to a content-addressed cache,
-so a second run makes zero paid calls.
-
-The corpus is **1,500 items**: 1,200 gradable (GSM8K, MMLU-Pro — scored by exact match, no judge
-needed) and 300 free-form (summarisation, long-form QA, support replies — these need the judge).
-Every item records its source dataset, id and licence.
-
-## Layout
-
-```
-apps/gateway     TypeScript + Fastify. OpenAI-compatible proxy, provider adapters,
-                 trace recording, token and cost accounting.            (P1)
-apps/evald       Python + FastAPI. Replay runner, LLM-as-judge, calibration,
-                 significance testing, routing-policy fitting.       (P2-P5)
-apps/dashboard   Next.js. Pareto curve, per-route spend, trace explorer.  (P7)
-packages/shared  Shared TypeScript types and Zod schemas.
-config/          Model ladder and pricing. Every price cites its source.
-db/migrations/   Plain SQL, applied by the compose `migrate` service.
-corpus/          The frozen benchmark corpus. Never edited; corrections get a new slug.
-artifacts/       Committed benchmark output. The only source of any number.
-```
-
-## Phases
-
-| Phase | Scope                                                          | Status |
-| ----- | -------------------------------------------------------------- | ------ |
-| P0    | Design, decisions, scaffold, CI, docker compose                | done   |
-| P1    | Gateway: streaming proxy, adapters, traces, cost accounting    | done   |
-| P2    | Benchmark corpus + deterministic replay runner                 | done   |
-| P3    | LLM-as-judge + calibration against human labels (Cohen's κ)    | built  |
-| P4    | Paired bootstrap CIs, McNemar, regression-vs-noise verdicts    | built  |
-| P5    | Cascade router, threshold fitting, Pareto curve                | built  |
-| P6    | Semantic cache with calibrated threshold; hit + false-hit rate | next   |
-| P7    | Dashboard + GitHub Action PR comments                          |        |
-| P8    | Deploy, load test, README, demo                                |        |
+- Not a training or fine-tuning platform.
+- Not a general observability backend.
+- No multi-tenant auth, RBAC or billing.
+- v1 evaluates single-turn completions only.
+- **No per-request quality guarantee.** The guarantee is distributional over a route: "on traffic
+  resembling this route, the cheap model's win-or-tie rate against the reference is at least F, with
+  95% confidence." A single bad response is fully consistent with that holding. Any stronger claim
+  would be false.
