@@ -1,5 +1,7 @@
 # Verdict
 
+[![CI](https://github.com/iraagarg/verdict/actions/workflows/ci.yml/badge.svg)](https://github.com/iraagarg/verdict/actions/workflows/ci.yml)
+
 An OpenAI-compatible LLM gateway that records real traffic, replays it against candidate models,
 judges quality with a human-calibrated evaluator, decides regression-vs-noise with proper
 statistics, and uses that measurement to route live traffic to the cheapest model that still clears
@@ -176,6 +178,10 @@ make test         # 184 TypeScript tests, 354 Python tests
 make lint         # eslint, prettier, ruff
 make typecheck    # tsc --strict, mypy --strict
 ```
+
+CI runs four jobs on every push: TypeScript (lint, typecheck, test), Python (ruff, mypy, pytest),
+database migrations applied twice to prove idempotency, and a full `docker compose up` from a clean
+clone with health checks. The last one is why the quick-start above can be trusted.
 
 TypeScript strict with no `any`; Zod at every boundary. Python with `mypy --strict`; Pydantic at
 every boundary. Secrets validated at boot — the process exits before binding a port rather than
