@@ -18,6 +18,7 @@ Guarantees, each of which has a test:
 from __future__ import annotations
 
 import threading
+import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
@@ -76,6 +77,38 @@ class RunStats:
 
 
 CompleteFn = Callable[[str, list[dict[str, str]], dict[str, Any]], Generation]
+
+#: Called after every completed task. A long run that prints nothing is
+#: indistinguishable from a hung one, and a user watching a silent terminal for
+#: ten minutes will reasonably assume it has crashed and kill it.
+ProgressFn = Callable[["Progress"], None]
+
+
+@dataclass(frozen=True, slots=True)
+class Progress:
+    done: int
+    total: int
+    spent_usd: float
+    cache_hits: int
+    errors: int
+    elapsed_s: float
+
+    @property
+    def eta_s(self) -> float:
+        if self.done == 0:
+            return 0.0
+        return (self.elapsed_s / self.done) * (self.total - self.done)
+
+    def render(self) -> str:
+        pct = 100.0 * self.done / self.total if self.total else 0.0
+        eta = f"{int(self.eta_s // 60)}m{int(self.eta_s % 60):02d}s" if self.done else "--"
+        return (
+            f"  {self.done:>5}/{self.total} ({pct:5.1f}%)  "
+            f"${self.spent_usd:.4f} spent  "
+            f"{self.cache_hits} cached  "
+            f"{self.errors} errors  "
+            f"ETA {eta}"
+        )
 
 
 def build_tasks(
@@ -141,6 +174,8 @@ def run_replay(
     concurrency: int = 8,
     max_attempts: int = 3,
     rate_limiter: RateLimiter | NullRateLimiter | None = None,
+    on_progress: ProgressFn | None = None,
+    progress_every: int = 5,
 ) -> RunStats:
     """Execute `tasks`, returning stats. Aborts hard when the budget is reached.
 
@@ -152,6 +187,7 @@ def run_replay(
     stats = RunStats()
     stop = threading.Event()
     limiter = rate_limiter or NullRateLimiter()
+    started_at = time.monotonic()
 
     def execute(task: Task) -> Outcome | None:
         if stop.is_set():
@@ -255,10 +291,23 @@ def run_replay(
 
     with ThreadPoolExecutor(max_workers=concurrency) as pool:
         futures = {pool.submit(execute, t): t for t in tasks}
+        done = 0
         for future in as_completed(futures):
             outcome = future.result()
+            done += 1
             if outcome is not None:
                 stats.add(outcome)
+            if on_progress and (done % progress_every == 0 or done == len(tasks)):
+                on_progress(
+                    Progress(
+                        done=done,
+                        total=len(tasks),
+                        spent_usd=round(sum(o.cost_usd for o in stats.outcomes), 6),
+                        cache_hits=sum(1 for o in stats.outcomes if o.from_cache),
+                        errors=sum(1 for o in stats.outcomes if o.error_kind),
+                        elapsed_s=time.monotonic() - started_at,
+                    )
+                )
 
     return stats
 

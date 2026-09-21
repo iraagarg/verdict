@@ -23,17 +23,31 @@ from evald.models_config import ModelConfig
 #: exact pre-run count is not available for the whole ladder (D-017).
 CHARS_PER_TOKEN = 4.0
 
-#: Assumed output length per task type, in tokens, used only for projection.
-#: Replaced by measured medians once `calibrate_from_run` has real data.
+#: Assumed output length per task type, in tokens.
+#:
+#: The gradable figures are MEASURED: a 175-call pilot across gpt-oss-20b,
+#: Haiku 4.5 and Sonnet 5 on an even maths/multiple-choice split averaged ~650
+#: output tokens. The original assumptions (300 and 150) under-projected the
+#: pilot's cost by 2.1x, because reasoning models spend heavily on chains of
+#: thought even for a multiple-choice answer.
+#:
+#: The free-form figures are still assumptions and are marked as such — no
+#: free-form replay has run yet.
 DEFAULT_OUTPUT_TOKENS: dict[str, int] = {
-    "math_word_problem": 300,
-    "multiple_choice": 150,
-    "summarization": 220,
-    "long_form_qa": 420,
-    "support_reply": 260,
+    "math_word_problem": 650,  # measured, 2026-09-21 pilot
+    "multiple_choice": 650,  # measured, 2026-09-21 pilot
+    "summarization": 220,  # assumed
+    "long_form_qa": 420,  # assumed
+    "support_reply": 260,  # assumed
 }
 
-TOKEN_ESTIMATE_METHOD = f"chars/{CHARS_PER_TOKEN:g} heuristic; output from per-task assumptions"
+#: Which task types above rest on measurement rather than assumption.
+MEASURED_TASKS: frozenset[str] = frozenset({"math_word_problem", "multiple_choice"})
+
+TOKEN_ESTIMATE_METHOD = (
+    f"input: chars/{CHARS_PER_TOKEN:g} heuristic. "
+    f"output: measured medians for {sorted(MEASURED_TASKS)}, assumptions elsewhere"
+)
 
 
 def estimate_input_tokens(item: CorpusItem) -> int:

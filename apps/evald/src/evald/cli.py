@@ -32,6 +32,7 @@ from evald.calibrate.sample import build_pairs
 from evald.corpus import sources
 from evald.corpus.assemble import PilotResult, build_corpus, filter_by_difficulty
 from evald.corpus.schema import CorpusItem, corpus_sha256
+from evald.corpus.verifiers import verify
 from evald.judge.judge import PairwiseJudge
 from evald.judge.rubric import RUBRIC_VERSION
 from evald.judge.store import GenerationStore, MissingGenerationError
@@ -42,8 +43,9 @@ from evald.replay.cache import ResponseCache, cache_key
 from evald.replay.client import GatewayClient
 from evald.replay.plan import TOKEN_ESTIMATE_METHOD, compare_projection, project_run
 from evald.replay.ratelimit import NullRateLimiter, RateLimiter
-from evald.replay.runner import build_tasks, request_params, run_replay, summarise
+from evald.replay.runner import Progress, build_tasks, request_params, run_replay, summarise
 from evald.router.fit import FIT_SPLIT, REPORT_SPLIT, fit_and_report
+from evald.stats.verdict import compare_runs
 
 DEFAULT_CORPUS = Path("../../corpus/items.jsonl")
 DEFAULT_CACHE = Path("../../.cache/replay")
@@ -132,6 +134,10 @@ def cmd_replay_plan(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_progress(p: Progress) -> None:
+    print(p.render(), file=sys.stderr, flush=True)
+
+
 def _replicate_map(items: list[CorpusItem], subset: int, k: int) -> dict[str, int]:
     """K replicates on the first `subset` slugs, 1 elsewhere.
 
@@ -185,6 +191,7 @@ def cmd_replay_run(args: argparse.Namespace) -> int:
             max_output_tokens=args.max_tokens,
             concurrency=args.concurrency,
             rate_limiter=RateLimiter(rpm=args.rpm) if args.rpm > 0 else NullRateLimiter(),
+            on_progress=_print_progress,
         )
 
     summaries = summarise(stats, config)
@@ -275,6 +282,7 @@ def cmd_pilot(args: argparse.Namespace) -> int:
             max_output_tokens=args.max_tokens,
             concurrency=args.concurrency,
             rate_limiter=RateLimiter(rpm=args.rpm) if args.rpm > 0 else NullRateLimiter(),
+            on_progress=_print_progress,
         )
 
     results = [
@@ -514,6 +522,57 @@ def cmd_fit(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_verdict(args: argparse.Namespace) -> int:
+    """Compare two models on the gradable slice, from cached generations.
+
+    Uses VERIFIER correctness (exact match against ground truth), not the
+    judge's win-or-tie. That is a different metric from D-003's and the output
+    says so — but it needs no judge, no labels and no spend, so it is the first
+    statistically honest comparison available.
+    """
+    config = load_model_config(args.config)
+    items = load_corpus(args.corpus)
+    store = GenerationStore(ResponseCache(args.cache), config, args.max_tokens)
+
+    paired_a: list[bool] = []
+    paired_b: list[bool] = []
+    slugs: list[str] = []
+    missing = 0
+
+    for item in items:
+        if not item.verifiable or item.verifier is None or item.ground_truth is None:
+            continue
+        try:
+            gen_a = store.get(item, args.model_a)
+            gen_b = store.get(item, args.model_b)
+        except MissingGenerationError:
+            missing += 1
+            continue
+        paired_a.append(verify(item.verifier, gen_a.text, item.ground_truth))
+        paired_b.append(verify(item.verifier, gen_b.text, item.ground_truth))
+        slugs.append(item.slug)
+
+    if not paired_a:
+        raise SystemExit(
+            f"no items have cached generations for BOTH {args.model_a} and {args.model_b}. "
+            f"Run the pilot or a replay covering both models first."
+        )
+
+    verdict = compare_runs(
+        paired_a,
+        paired_b,
+        margin=args.margin,
+        label_baseline=args.model_a,
+        label_candidate=args.model_b,
+    )
+    print(verdict.summary())
+    print("\n  metric        verifier correctness (exact match), NOT judge win-or-tie")
+    print(f"  items paired  {len(paired_a)} of {sum(1 for i in items if i.verifiable)} gradable")
+    if missing:
+        print(f"  skipped       {missing} items lacking a cached generation for one side")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="evald")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -620,6 +679,16 @@ def build_parser() -> argparse.ArgumentParser:
     fit.add_argument("--verifier-cost-nano", type=int, default=0)
     fit.add_argument("--seed", type=int, default=20260915)
     fit.set_defaults(func=cmd_fit)
+
+    vd = sub.add_parser("verdict", help="compare two models on the gradable slice (free, cached)")
+    vd.add_argument("--config", default="../../config/models.yaml")
+    vd.add_argument("--corpus", type=Path, default=DEFAULT_CORPUS)
+    vd.add_argument("--cache", type=Path, default=DEFAULT_CACHE)
+    vd.add_argument("--model-a", required=True, help="baseline")
+    vd.add_argument("--model-b", required=True, help="candidate")
+    vd.add_argument("--max-tokens", type=int, default=2048)
+    vd.add_argument("--margin", type=float, default=0.03)
+    vd.set_defaults(func=cmd_verdict)
 
     return p
 

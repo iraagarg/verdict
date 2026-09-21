@@ -1111,3 +1111,96 @@ gateway instead of building a second cost path.
 live saving comes from the offline policy. Moving the cascade into the live path needs either a
 shared verifier implementation (a WASM build, or an evald sidecar call) or acceptance of the
 buffering cost, and that is a decision to make with measurements in hand rather than now.
+
+---
+
+## D-041 — The maths slice is confirmed usable; the ladder's middle is not yet separable
+
+**Status:** MEASURED · **Date:** 2026-09-21 · **Phase:** P2/P5 · **Resolves:** D-030's open question
+
+**The measurement.** First real multi-tier pilot: 60 gradable items (30 hard MATH, 30 MMLU-Pro)
+across three rungs, 175 successful calls, **$0.4925 actual spend**.
+
+| Model                | Overall | MATH 3–5 | MMLU-Pro |
+| -------------------- | ------- | -------- | -------- |
+| `openai/gpt-oss-20b` | 0.655   | 0.679    | 0.630    |
+| `claude-haiku-4-5`   | 0.817   | 0.833    | 0.800    |
+| `claude-sonnet-5`    | 0.817   | 0.800    | 0.833    |
+
+**D-030 is resolved: the maths slice is NOT too hard.** Sonnet 5 scores 0.80 on MATH levels 3–5.
+The ceiling risk was removed by D-030's swap away from GSM8K, and the floor risk it created has now
+been ruled out by measurement rather than assumed away. The gradable slice discriminates.
+
+**The finding that matters more.** Haiku 4.5 and Sonnet 5 scored **identically** — 0.8167 against
+0.8167, effect exactly 0.0000, McNemar p = 1.000. Sonnet is a 2× more expensive rung. The tempting
+reading is "no difference, route everything to Haiku, halve the bill."
+
+P4 refuses that reading. Run through the verdict layer:
+
+```
+VERDICT: INCONCLUSIVE
+  claude-haiku-4-5 -> claude-sonnet-5
+  effect        +0.0000  [-0.1000, +0.1000]  (95% CI)
+  n             60 items, 8 discordant
+  resolution    0.1000   (too wide to ever show EQUIVALENT at this margin)
+```
+
+The interval is ±0.10 against a ±0.03 margin. A perfect zero and a p-value of exactly 1.0, and the
+system still says _we cannot tell_. This is precisely the failure D-035 was built to prevent,
+demonstrated on real data rather than argued in the abstract, and it is the clearest justification
+in the project for having four verdicts instead of three.
+
+By contrast, the wider gap IS conclusive at the same n:
+
+```
+VERDICT: IMPROVEMENT
+  openai/gpt-oss-20b -> claude-haiku-4-5
+  effect        +0.1636  [+0.0364, +0.2909]  (95% CI)
+  McNemar p     0.022461  (exact, 13 discordant)
+```
+
+**Consequence.** To separate Haiku from Sonnet at a ±0.03 margin needs roughly **667 paired items**
+(the half-width scales as 1/√n: 60 × (0.10/0.03)² ≈ 667). Until that runs, no claim may be made
+about those two rungs in either direction. The Groq-to-Haiku gap, however, is already established.
+
+**Caveat on the metric.** These verdicts use **verifier correctness** (exact match against ground
+truth), not D-003's judge win-or-tie. It needs no judge, no labels and no further spend, so it is
+the first statistically honest comparison available — but it is a different measurement and the
+`evald verdict` output says so on every run.
+
+---
+
+## D-042 — Cost projections are now calibrated against measurement
+
+**Status:** ACCEPTED · **Date:** 2026-09-21 · **Phase:** P2
+
+**The gap.** The pilot projected **$0.2366** and cost **$0.4925** — a 2.1× under-projection. Cause:
+per-task output assumptions of 300 tokens (maths) and 150 (multiple choice) against measured
+averages of 440–953. Reasoning models spend heavily on chains of thought even to answer a
+multiple-choice question.
+
+**Decision.** The gradable task types now use measured medians (650 tokens), the free-form ones are
+still assumptions, and `MEASURED_TASKS` records which is which. `TOKEN_ESTIMATE_METHOD`, written
+into every artifact, now names both.
+
+**Rationale.** A projection that is quietly wrong by 2× is worse than no projection: it is what a
+user decides to spend money on. Making the estimate self-correcting — `compare_projection` already
+records projected-versus-actual on every run artifact — is the point of having recorded both.
+
+---
+
+## D-043 — The runner reports progress
+
+**Status:** ACCEPTED · **Date:** 2026-09-21 · **Phase:** P2
+
+**What happened.** The pilot ran for ten minutes printing nothing. It was working — 24 calls a
+minute, all succeeding — but from the terminal it was indistinguishable from a hang, and the correct
+user response to an apparent hang is Ctrl-C, which would have discarded the run.
+
+**Decision.** `run_replay` takes an `on_progress` callback, reporting completed/total, spend so far,
+cache hits, errors and an ETA every five tasks.
+
+**Rationale.** Silence is not neutral. A long-running command that gives no signal trains the user
+to kill it, and a spend cap is no protection against a user who aborts a run they have already paid
+for. Spend is shown live for the same reason: the number that matters most should never require a
+database query to see.
