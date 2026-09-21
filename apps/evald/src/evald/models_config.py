@@ -94,7 +94,8 @@ class Embedding(BaseModel):
 
     model: str | None
     dimensions: int | None
-    provider: Provider | None = None
+    #: "local" runs in-process and costs nothing, so it carries no pricing block.
+    provider: Provider | Literal["local"] | None = None
     pricing: Pricing | None = None
 
 

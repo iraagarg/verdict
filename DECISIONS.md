@@ -1330,3 +1330,42 @@ prompt is identical across every request in a route, so including it drags every
 1.0 and destroys the discrimination the threshold depends on — and the system prompt is already
 accounted for by `prompt_version`. And TTL is stored as an absolute `expires_at` filtered in SQL,
 not as a duration, so a lapsed entry can never be served even if the sweeper has not run.
+
+---
+
+## D-049 — Embedding model switched to a local one, because D-044 needed an account we do not have
+
+**Status:** ACCEPTED · **Date:** 2026-09-22 · **Phase:** P6 · **Amends:** D-044
+
+**What went wrong.** D-044 chose `openai/text-embedding-3-small` partly on the argument that the
+TypeScript gateway could call it directly. That argument was sound and the premise was not checked:
+there is no OpenAI key on this account, and there never was. The decision was approved and the
+calibration could not run.
+
+**Decision.** `BAAI/bge-small-en-v1.5`, run locally in-process via `fastembed`. 384 dimensions, no
+API key, no network after the first model download, free.
+
+**Measured before committing to it**, on two real corpus prompts:
+
+| Pair                              | Cosine     |
+| --------------------------------- | ---------- |
+| A question vs a paraphrase of it  | **0.9106** |
+| Two genuinely different questions | **0.6701** |
+
+Clean separation, which is the only property the threshold calibration needs.
+
+**Why the amendment was free, and why that window mattered.** D-015 made the embedding dimension
+migration-breaking: changing it means rewriting three columns and rebuilding two HNSW indexes. It
+was free here only because both vector tables were still empty. Had a single calibration run
+happened first, this would have been a data migration instead of a one-line config change. The
+window is now closed.
+
+**Consequence, stated plainly.** The gateway cannot run an ONNX model, so the live semantic cache
+would need a round-trip to `evald` and is offline-only for now — the same position as the cascade in
+D-040, and consistent with it. The calibration, which is what produces the reportable number, is
+unaffected and now costs **$0.00**: embeddings are local, and the paraphrases run on Groq's free
+tier.
+
+**The lesson worth stating.** A decision that rests on an unverified premise about the environment
+is a guess wearing a rationale. The premise ("we can call this API") was the cheapest thing in the
+whole decision to check, and checking it was skipped because the reasoning around it felt solid.

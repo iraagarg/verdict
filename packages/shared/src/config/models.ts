@@ -94,8 +94,9 @@ const ModelConfig = z
         /** `dimensions` is migration-breaking (DECISIONS.md D-015). */
         model: z.string().min(1).nullable(),
         dimensions: z.number().int().positive().nullable(),
-        provider: z.enum(["anthropic", "openai", "groq"]).optional(),
-        pricing: Pricing.optional(),
+        /** "local" runs in-process and costs nothing, so it has no pricing block. */
+        provider: z.enum(["anthropic", "openai", "groq", "local"]).optional(),
+        pricing: Pricing.nullish(),
       })
       .strict(),
     safe_default: z.string().min(1),

@@ -3,13 +3,16 @@
 --
 -- Deferred from 0001 because it needs a fixed embedding dimension, and D-015
 -- made that a migration-breaking constant: changing it means rewriting three
--- columns and rebuilding two HNSW indexes. D is now 1536
--- (openai/text-embedding-3-small), chosen in D-044.
+-- columns and rebuilding two HNSW indexes. D is 384
+-- (BAAI/bge-small-en-v1.5, run locally), chosen in D-044 and amended in D-049.
+--
+-- The amendment was free because it happened while both vector tables were
+-- still empty. That window is now closed.
 -- ─────────────────────────────────────────────────────────────────────────────
 
 -- Route clustering and corpus-level similarity work.
 ALTER TABLE corpus_items
-  ADD COLUMN IF NOT EXISTS embedding vector(1536);
+  ADD COLUMN IF NOT EXISTS embedding vector(384);
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Fitted routing policy (DESIGN.md §5.1)
@@ -18,7 +21,7 @@ CREATE TABLE IF NOT EXISTS routes (
   id             uuid PRIMARY KEY,
   policy_version int  NOT NULL,
   route_key      text NOT NULL,
-  centroid       vector(1536) NOT NULL,
+  centroid       vector(384) NOT NULL,
   task_type      task_type,
   assigned_model text NOT NULL,
   floor_value    real NOT NULL,
@@ -49,7 +52,7 @@ CREATE INDEX IF NOT EXISTS routes_centroid_hnsw
 -- ─────────────────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS semantic_cache_entries (
   id             uuid PRIMARY KEY,
-  embedding      vector(1536) NOT NULL,
+  embedding      vector(384) NOT NULL,
   request_hash   bytea NOT NULL,
   model          text  NOT NULL,
   route_key      text,

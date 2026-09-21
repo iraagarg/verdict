@@ -597,6 +597,153 @@ def cmd_verdict(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_cache_calibrate(args: argparse.Namespace) -> int:
+    """Embed the corpus, build labelled pairs, and fit the similarity threshold.
+
+    Embedding runs locally and is free. The only spend is generating paraphrases
+    for the positive pairs, which on Groq's free tier is also free.
+    """
+    from evald.cache.artifact import CacheCalibrationArtifact, ThresholdPointModel
+    from evald.cache.calibrate import calibrate
+    from evald.cache.embed import EmbeddingCache, LocalEmbedder, embed_all
+    from evald.cache.pairs import (
+        PARAPHRASE_INSTRUCTION,
+        hardest_negatives,
+        paraphrase_positives,
+        read_pairs,
+        write_pairs,
+    )
+    from evald.stats.proportion import min_trials_for_upper_bound
+
+    config = load_model_config(args.config)
+    if config.embedding.model is None or config.embedding.dimensions is None:
+        raise SystemExit("config/models.yaml has no embedding model configured.")
+
+    items = load_corpus(args.corpus)
+    #: Only free-form and gradable PROMPTS matter here; the cache keys on the
+    #: user's request, not on any answer.
+    pool = sorted(items, key=lambda i: i.slug)[: args.n]
+    texts = {i.slug: i.prompt_text() for i in pool}
+
+    embedder = LocalEmbedder(config.embedding.model, config.embedding.dimensions)
+    cache = EmbeddingCache(args.embedding_cache)
+
+    print(f"embedding {len(texts)} corpus prompts ({embedder.model_name}, local, free)...")
+    embeddings = embed_all(
+        texts,
+        embedder,
+        cache,
+        on_progress=lambda d, t: print(f"  {d}/{t}", file=sys.stderr, flush=True),
+    )
+    print(f"  cache: {cache.hits} hits, {cache.misses} misses")
+
+    # ── negatives: free, no model call ───────────────────────────────────────
+    negatives = hardest_negatives(list(texts), texts, embeddings, per_item=args.negatives_per_item)
+    needed = min_trials_for_upper_bound(args.max_false_hit_rate)
+    print(
+        f"  {len(negatives)} hard negatives (need >= {needed} to prove "
+        f"{args.max_false_hit_rate:.1%})"
+    )
+
+    # ── positives: paraphrase each prompt, then embed the paraphrase ─────────
+    paraphrase_path = Path(args.paraphrases)
+    existing = (
+        {
+            json.loads(line)["slug"]: json.loads(line)["text"]
+            for line in paraphrase_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        }
+        if paraphrase_path.is_file()
+        else {}
+    )
+    wanted = [s for s in sorted(texts) if s not in existing][
+        : max(0, args.positives - len(existing))
+    ]
+
+    if wanted:
+        print(f"\ngenerating {len(wanted)} paraphrases on {args.paraphrase_model}...")
+        with GatewayClient(args.gateway) as client:
+            if not client.health():
+                raise SystemExit(f"gateway at {args.gateway} is not healthy; run `make up`.")
+            limiter = RateLimiter(rpm=args.rpm) if args.rpm > 0 else NullRateLimiter()
+            paraphrase_path.parent.mkdir(parents=True, exist_ok=True)
+            with paraphrase_path.open("a", encoding="utf-8") as fh:
+                for n, slug in enumerate(wanted, start=1):
+                    limiter.acquire()
+                    try:
+                        gen = client.complete(
+                            args.paraphrase_model,
+                            [
+                                {"role": "system", "content": PARAPHRASE_INSTRUCTION},
+                                {"role": "user", "content": texts[slug]},
+                            ],
+                            {"max_tokens": args.max_tokens},
+                        )
+                    except Exception as err:
+                        print(f"  skip {slug}: {err}", file=sys.stderr)
+                        continue
+                    existing[slug] = gen.text.strip()
+                    fh.write(json.dumps({"slug": slug, "text": existing[slug]}) + "\n")
+                    fh.flush()
+                    if n % 10 == 0:
+                        print(f"  {n}/{len(wanted)}", file=sys.stderr, flush=True)
+
+    para_texts = {f"{s}#p": t for s, t in existing.items() if s in embeddings}
+    para_emb_raw = embed_all(para_texts, embedder, cache)
+    para_embeddings = {k[:-2]: v for k, v in para_emb_raw.items()}
+    positives = paraphrase_positives(existing, texts, embeddings, para_embeddings)
+    print(f"  {len(positives)} paraphrase positives")
+
+    pairs = positives + negatives
+    write_pairs(pairs, Path(args.pairs))
+
+    curve = calibrate(
+        pairs,
+        max_false_hit_rate=args.max_false_hit_rate,
+        min_hit_rate=args.min_hit_rate,
+        seed=args.seed,
+    )
+    print()
+    print(curve.render())
+
+    chosen = curve.chosen()
+    artifact = CacheCalibrationArtifact(
+        created_at=now_iso(),
+        git_sha=git_sha(),
+        seed=args.seed,
+        corpus_sha256=corpus_sha256(items),
+        embedding_model=embedder.model_name,
+        embedding_dimensions=embedder.dimensions,
+        max_false_hit_rate=args.max_false_hit_rate,
+        min_hit_rate=args.min_hit_rate,
+        alpha=0.05,
+        n_duplicates=curve.n_duplicates,
+        n_different=curve.n_different,
+        min_negatives_required=needed,
+        points=[ThresholdPointModel.model_validate(p, from_attributes=True) for p in curve.points],
+        chosen_threshold=chosen.threshold if chosen else None,
+        chosen_hit_rate=chosen.hit_rate if chosen else None,
+        chosen_false_hit_rate=chosen.false_hit_rate if chosen else None,
+        chosen_false_hit_ci_high=chosen.false_hit_ci_high if chosen else None,
+        no_threshold_reason=None
+        if chosen
+        else "see render(); no threshold was both safe and useful",
+        human_verified_pairs=sum(1 for p in read_pairs(Path(args.pairs)) if p.human_verified),
+        notes=[
+            "Negatives are HARD: each item paired with its nearest DIFFERENT neighbour. "
+            "Random negatives are trivially separable and would flatter any threshold.",
+            "The false-hit bound is Clopper-Pearson, not bootstrap: the bootstrap reports "
+            "exactly zero when it observes no events, which would let an untested threshold "
+            "look proven (D-047).",
+            "Positives are model-generated paraphrases. Spot-check them before trusting the "
+            "hit rate.",
+        ],
+    )
+    out = artifact.write(Path(args.artifacts) / "cache-calibration.json")
+    print(f"\nartifact: {out}")
+    return 0 if chosen else 6
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="evald")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -714,6 +861,25 @@ def build_parser() -> argparse.ArgumentParser:
     vd.add_argument("--margin", type=float, default=0.03)
     vd.add_argument("--artifacts", type=Path, default=DEFAULT_ARTIFACTS)
     vd.set_defaults(func=cmd_verdict)
+
+    cc = sub.add_parser("cache-calibrate", help="fit the semantic cache similarity threshold")
+    cc.add_argument("--config", default="../../config/models.yaml")
+    cc.add_argument("--corpus", type=Path, default=DEFAULT_CORPUS)
+    cc.add_argument("--artifacts", type=Path, default=DEFAULT_ARTIFACTS)
+    cc.add_argument("--gateway", default="http://localhost:8080")
+    cc.add_argument("--embedding-cache", type=Path, default=Path("../../.cache/embeddings"))
+    cc.add_argument("--paraphrases", type=Path, default=Path("../../calibration/paraphrases.jsonl"))
+    cc.add_argument("--pairs", type=Path, default=Path("../../calibration/cache-pairs.jsonl"))
+    cc.add_argument("-n", type=int, default=600, help="corpus prompts to embed")
+    cc.add_argument("--positives", type=int, default=200, help="paraphrases to generate")
+    cc.add_argument("--negatives-per-item", type=int, default=1)
+    cc.add_argument("--paraphrase-model", default="openai/gpt-oss-20b")
+    cc.add_argument("--max-tokens", type=int, default=512)
+    cc.add_argument("--rpm", type=int, default=12)
+    cc.add_argument("--max-false-hit-rate", type=float, default=0.01)
+    cc.add_argument("--min-hit-rate", type=float, default=0.05)
+    cc.add_argument("--seed", type=int, default=20260922)
+    cc.set_defaults(func=cmd_cache_calibrate)
 
     return p
 

@@ -16,6 +16,8 @@ __pycache__/
 .env.local
 .DS_Store
 
+# Embedding and replay caches. Content-addressed and regenerable; the
+# embedding model is local and free, so refilling costs nothing at all.
 # Replay response cache. Content-addressed and reproducible, but ~10s of MB and
 # regenerable, so it is not committed. Deleting it only costs money to refill.
 .cache/

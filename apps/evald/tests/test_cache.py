@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import random
+from collections.abc import Sequence
 from pathlib import Path
 from typing import ClassVar
 
@@ -262,3 +263,138 @@ class TestCalibration:
         a, b = self.curve(seed=3), self.curve(seed=3)
         assert [p.threshold for p in a.points] == [p.threshold for p in b.points]
         assert [p.false_hit_ci_high for p in a.points] == [p.false_hit_ci_high for p in b.points]
+
+
+class FakeEmbedder:
+    """Deterministic stand-in. Real embedding in a unit test is slow and tests nothing."""
+
+    def __init__(self, dimensions: int = 4) -> None:
+        self._dims = dimensions
+        self.calls: list[list[str]] = []
+
+    @property
+    def model_name(self) -> str:
+        return "fake-model"
+
+    @property
+    def dimensions(self) -> int:
+        return self._dims
+
+    def embed_texts(self, texts: Sequence[str]) -> list[list[float]]:
+        self.calls.append(list(texts))
+        out = []
+        for t in texts:
+            h = sum(ord(c) for c in t)
+            out.append([float((h >> i) % 7) for i in range(self._dims)])
+        return out
+
+
+class TestEmbeddingCache:
+    def test_round_trips_a_vector(self, tmp_path: Path) -> None:
+        from evald.cache.embed import EmbeddingCache
+
+        cache = EmbeddingCache(tmp_path)
+        assert cache.get("abc") is None
+        cache.put("abc", [1.0, 2.0])
+        assert cache.get("abc") == [1.0, 2.0]
+        assert (cache.hits, cache.misses) == (1, 1)
+
+    def test_survives_a_truncated_file(self, tmp_path: Path) -> None:
+        from evald.cache.embed import EmbeddingCache
+
+        cache = EmbeddingCache(tmp_path)
+        cache.put("dead", [1.0])
+        (tmp_path / "de" / "dead.json").write_text("[1.0")
+        assert cache.get("dead") is None
+
+    def test_leaves_no_temp_files_behind(self, tmp_path: Path) -> None:
+        from evald.cache.embed import EmbeddingCache
+
+        EmbeddingCache(tmp_path).put("k" * 64, [1.0])
+        assert list(tmp_path.rglob("*.tmp")) == []
+
+
+class TestTextHash:
+    def test_same_text_and_model_gives_the_same_key(self) -> None:
+        from evald.cache.embed import text_hash
+
+        assert text_hash("hello", "m1") == text_hash("hello", "m1")
+
+    def test_different_models_never_share_a_key(self) -> None:
+        # Vectors from two models live in different spaces. Sharing a cache key
+        # would silently mix them, and cosine between them is meaningless.
+        from evald.cache.embed import text_hash
+
+        assert text_hash("hello", "m1") != text_hash("hello", "m2")
+
+    def test_different_text_gives_a_different_key(self) -> None:
+        from evald.cache.embed import text_hash
+
+        assert text_hash("a", "m") != text_hash("b", "m")
+
+
+class TestEmbedAll:
+    def test_embeds_everything_once(self) -> None:
+        from evald.cache.embed import embed_all
+
+        embedder = FakeEmbedder()
+        out = embed_all({"a": "one", "b": "two"}, embedder)
+        assert set(out) == {"a", "b"}
+        assert all(len(v) == 4 for v in out.values())
+
+    def test_a_second_run_costs_nothing(self, tmp_path: Path) -> None:
+        from evald.cache.embed import EmbeddingCache, embed_all
+
+        cache = EmbeddingCache(tmp_path)
+        embedder = FakeEmbedder()
+        texts = {"a": "one", "b": "two"}
+
+        embed_all(texts, embedder, cache)
+        assert len(embedder.calls) == 1
+
+        embed_all(texts, embedder, cache)
+        assert len(embedder.calls) == 1  # nothing re-embedded
+
+    def test_only_embeds_the_new_items(self, tmp_path: Path) -> None:
+        from evald.cache.embed import EmbeddingCache, embed_all
+
+        cache = EmbeddingCache(tmp_path)
+        embedder = FakeEmbedder()
+        embed_all({"a": "one"}, embedder, cache)
+        embedder.calls.clear()
+
+        embed_all({"a": "one", "b": "two"}, embedder, cache)
+        assert embedder.calls == [["two"]]
+
+    def test_batches_large_inputs(self) -> None:
+        from evald.cache.embed import embed_all
+
+        embedder = FakeEmbedder()
+        embed_all({f"k{i}": f"t{i}" for i in range(10)}, embedder, batch_size=3)
+        assert [len(c) for c in embedder.calls] == [3, 3, 3, 1]
+
+    def test_handles_an_empty_input(self) -> None:
+        from evald.cache.embed import embed_all
+
+        assert embed_all({}, FakeEmbedder()) == {}
+
+
+class TestLocalEmbedderContract:
+    def test_rejects_a_dimension_mismatch(self) -> None:
+        # Config, the database schema and the model must agree, or every stored
+        # vector is unusable and cosine silently compares different spaces.
+        from evald.cache.embed import LocalEmbedder
+
+        embedder = LocalEmbedder("fake", dimensions=999)
+        embedder._model = type(
+            "M", (), {"embed": staticmethod(lambda ts: [[0.0] * 4 for _ in ts])}
+        )()
+        with pytest.raises(ValueError, match="dimensions"):
+            embedder.embed_texts(["x"])
+
+    def test_reports_its_configured_identity(self) -> None:
+        from evald.cache.embed import DEFAULT_DIMENSIONS, DEFAULT_MODEL, LocalEmbedder
+
+        e = LocalEmbedder()
+        assert e.model_name == DEFAULT_MODEL
+        assert e.dimensions == DEFAULT_DIMENSIONS == 384

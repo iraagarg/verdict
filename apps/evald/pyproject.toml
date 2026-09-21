@@ -19,6 +19,7 @@ evald = "evald.cli:main"
 dev = [
   "pytest>=8.3",
   "datasets>=3.0",
+  "fastembed>=0.5",
   "types-PyYAML>=6.0",
   "httpx2>=0.29",
   "scipy>=1.14",
