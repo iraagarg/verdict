@@ -1529,3 +1529,36 @@ having as real, tested code rather than a paragraph saying it would be straightf
 **Cost control, in both paths.** Only PRs touching `prompts/**` trigger a run. The Action caps spend,
 caches replay responses across runs so an unchanged prompt costs $0 after the first, and updates its
 own comment in place rather than posting a new one on every push.
+
+---
+
+## D-055 — One source of truth for the pnpm version, and a moving action tag broke CI
+
+**Status:** ACCEPTED · **Date:** 2026-09-23 · **Phase:** P7
+
+**What happened.** CI's TypeScript job began failing after 8 seconds, at `pnpm/action-setup@v4`,
+before a single command ran:
+
+> Multiple versions of pnpm specified: version `12` in the GitHub Action config with the key
+> `version`, version `pnpm@12.4.1` in package.json with the key `packageManager`. Remove one of
+> these versions to avoid version mismatch errors like `ERR_PNPM_BAD_PM_VERSION`.
+
+**No commit caused it.** Both declarations had been there since P0 and CI passed with them 13 hours
+earlier. `pnpm/action-setup@v4` is a **moving tag**, and a new release under it turned a tolerated
+duplicate into a hard error.
+
+**Decision.** Remove the `version:` input from both workflows. `packageManager` in `package.json` is
+the single source of truth, so a laptop and CI cannot drift onto different pnpm versions — which is
+the better arrangement independently of this failure.
+
+**The lesson, which is the part worth keeping.** An unpinned third-party action means a build that
+was green can go red with no change from you, at a moment you did not choose. `@v4` is a promise
+about compatibility made by someone else. Pinning every action to a commit SHA removes that class of
+surprise entirely, at the cost of updating them by hand; that is a defensible next step rather than
+something to do reflexively, and this entry exists so the tradeoff is a known one rather than a
+surprise a second time.
+
+**Also worth noting about the failure itself.** Three of the four CI jobs stayed green — Python,
+migrations, and the full `docker compose` clean-clone build. The fault was confined to one job's
+setup, which is the argument for having four independent jobs rather than one: a broken toolchain
+setup in the TypeScript job told us nothing false about the Python code or the schema.

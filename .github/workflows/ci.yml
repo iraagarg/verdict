@@ -25,9 +25,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # No `version:` here on purpose. `packageManager` in package.json is the
+      # single source of truth, so CI and a laptop cannot drift onto different
+      # pnpm versions. Declaring it in both places made pnpm/action-setup fail
+      # outright with "Multiple versions of pnpm specified" (DECISIONS.md D-055).
       - uses: pnpm/action-setup@v4
-        with:
-          version: 12
 
       - uses: actions/setup-node@v4
         with:
