@@ -114,8 +114,8 @@ export default function TracesPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Trace explorer</h1>
         <p className="mt-2 text-pretty text-sm text-neutral-600 dark:text-neutral-400">
-          {artifact.note} Exported {artifact.exported_at.slice(0, 10)}; sampled evenly across models
-          rather than most-recent-first, which would have returned one model&rsquo;s traffic.
+          {artifact.note} Exported {artifact.exported_at.slice(0, 10)}. Stratified sampling matters
+          here: most-recent-first returned 200 rows from a single model.
         </p>
       </div>
 

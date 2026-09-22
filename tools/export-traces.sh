@@ -21,7 +21,7 @@ docker compose exec -T postgres psql -U verdict -d verdict -tAc "
   SELECT json_build_object(
     'artifact_version', 1,
     'exported_at', to_char(now() at time zone 'utc', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'),
-    'note', 'A SNAPSHOT of gateway traffic, not a live feed. Sampled most-recent-first.',
+    'note', 'A SNAPSHOT of gateway traffic, not a live feed. Sampled evenly across models, not most-recent-first.',
     'total_traces_in_db', (SELECT count(*) FROM traces),
     'sampled', count(*),
     'traces', coalesce(json_agg(t ORDER BY t.created_at DESC), '[]'::json)

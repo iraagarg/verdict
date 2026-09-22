@@ -182,7 +182,7 @@ optimisation happens only where there is positive evidence it is safe.
 
 ```bash
 make install      # pnpm workspace + evald virtualenv (Python 3.12)
-make test         # 211 TypeScript tests, 413 Python tests
+make test         # 254 TypeScript tests, 413 Python tests
 make lint         # eslint, prettier, ruff
 make typecheck    # tsc --strict, mypy --strict
 ```

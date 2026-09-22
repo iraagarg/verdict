@@ -11,6 +11,11 @@ RUN pnpm install --filter @verdict/dashboard... --frozen-lockfile || \
 
 FROM deps AS build
 COPY apps/dashboard apps/dashboard
+# The dashboard reads committed artifacts at BUILD time and bakes them into the
+# static output (D-052). Without this the image builds cleanly and every page
+# renders its empty state, which looks identical to "no measurement has run yet"
+# — a silent failure the container cannot report.
+COPY artifacts artifacts
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN pnpm --filter @verdict/dashboard build
 

@@ -1562,3 +1562,41 @@ surprise a second time.
 migrations, and the full `docker compose` clean-clone build. The fault was confined to one job's
 setup, which is the argument for having four independent jobs rather than one: a broken toolchain
 setup in the TypeScript job told us nothing false about the Python code or the schema.
+
+## D-056 — The dashboard image must carry `artifacts/`, and the trace note must be self-describing
+
+**Status:** ACCEPTED · **Date:** 2026-09-22 · **Phase:** P7 (defect)
+
+**What was wrong.** Three defects, all found by actually opening the running container rather than
+by reading code or running tests.
+
+1. `apps/dashboard/Dockerfile` copied `apps/dashboard` into the build stage and nothing else. The
+   dashboard reads `artifacts/` at **build** time and bakes the values into the static output
+   (D-052), so inside the image every loader returned `null` and every page rendered its empty
+   state. The build succeeded, the container reported healthy, and `make dash` on the host worked
+   perfectly — so nothing anywhere reported a problem. The containerised dashboard had never once
+   displayed a number.
+2. `tools/export-traces.sh` still wrote `note: "...Sampled most-recent-first."` after the sampling
+   was changed to stratified-by-model (D-053). `/spend` printed that note verbatim and was
+   therefore **false on its face**; `/traces` masked it by appending a correction in JSX.
+3. The running container was eight days stale — serving the P0 scaffold — because
+   `docker compose up -d` does not rebuild a service whose source has changed.
+
+**Decision.** `COPY artifacts artifacts` in the build stage. The export script's `note` states the
+actual sampling method. `/traces` no longer corrects the artifact in the page; it explains *why*
+stratification matters instead.
+
+**Alternatives rejected.** _Mount `artifacts/` as a compose volume_ — fixes the local container and
+not the image, so a deployed build would still be blank, which is the case that matters.
+_Have the dashboard query Postgres_ — reverses D-052 and reintroduces the connection string and the
+live dependency the static build exists to avoid. _Leave the JSX correction in place_ — it works
+visually while the committed artifact still misdescribes itself, and any other consumer of that
+file inherits the wrong claim.
+
+**Consequence, and the lesson that generalises.** An empty state is indistinguishable from a
+missing measurement. That ambiguity is *correct* for this project — most artifacts genuinely have
+not been produced yet — which is exactly why it hid a packaging bug for a whole phase. Where
+absence is a legitimate state, absence cannot also serve as the error signal. A build-time assertion
+that at least one artifact resolved would have caught this immediately, and P8 should add one.
+
+---
