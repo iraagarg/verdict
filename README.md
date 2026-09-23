@@ -100,7 +100,7 @@ in this README was typed by hand; every figure is read from `artifacts/`.
 | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
 | `apps/gateway`    | TypeScript + Fastify. OpenAI-compatible proxy, SSE streaming, three provider adapters, exact cost accounting, circuit breaker, routing. |
 | `apps/evald`      | Python + FastAPI. Corpus assembly, replay runner, LLM judge, calibration, statistics, policy fitting.                                   |
-| `apps/dashboard`  | Next.js. Placeholder.                                                                                                                   |
+| `apps/dashboard`  | Next.js. Pareto curve, spend by model, run comparison with the verdict drawn to scale, trace explorer with streaming replay. Reads committed artifacts only. |
 | `packages/shared` | Shared TypeScript types and Zod schemas.                                                                                                |
 | `config/`         | Model ladder and pricing. Every price cites its source and the date verified.                                                           |
 | `corpus/`         | 1,500 frozen benchmark items with per-item provenance and licence.                                                                      |
@@ -138,7 +138,7 @@ Both are free to run except one request costing $0.0002.
 
 ```bash
 cp .env.example .env          # add at least one provider key
-make up                       # postgres, redis, migrations, gateway, evald
+make up                       # postgres, redis, migrations, gateway, evald, dashboard
 curl -s localhost:8080/health
 ```
 
@@ -153,6 +153,9 @@ curl -N http://localhost:8080/v1/chat/completions \
 Response headers report what Verdict did, leaving the body a byte-for-byte OpenAI shape:
 `x-verdict-model-served`, `x-verdict-route`, `x-verdict-route-reason`, `x-verdict-cost-usd`,
 `x-verdict-usage-final`.
+
+The dashboard is on [localhost:3000](http://localhost:3000): measured verdicts, spend by model,
+the cache calibration, and a trace explorer that replays a recorded stream.
 
 ### Benchmarking
 
