@@ -195,10 +195,17 @@ optimisation happens only where there is positive evidence it is safe.
 
 ```bash
 make install      # pnpm workspace + evald virtualenv (Python 3.12)
+make check        # lint + typecheck + test, in CI's order. Run before pushing.
+
 make test         # 254 TypeScript tests, 413 Python tests
 make lint         # eslint, prettier, ruff
 make typecheck    # tsc --strict, mypy --strict
+make fmt          # auto-fix formatting
 ```
+
+`make check` exists because CI's TypeScript job runs `prettier --check .`, which
+covers markdown as well as code — so a documentation-only commit can turn CI red
+without touching a line of TypeScript.
 
 CI runs four jobs on every push: TypeScript (lint, typecheck, test), Python (ruff, mypy, pytest),
 database migrations applied twice to prove idempotency, and a full `docker compose up` from a clean

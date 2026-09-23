@@ -19,7 +19,7 @@ down: ## Stop the stack and remove volumes
 logs: ## Tail logs from all services
 	docker compose logs -f
 
-test: ## Run every test suite (this is what CI runs)
+test: ## Run every test suite
 	# Build first: the gateway imports @verdict/shared from dist, so a source
 	# change there is invisible to the tests until it is compiled. CI builds
 	# explicitly, and the local loop must not differ from CI.
@@ -36,6 +36,13 @@ lint: ## Lint everything
 	pnpm format:check
 	cd apps/evald && .venv/bin/python -m ruff check src tests
 	cd apps/evald && .venv/bin/python -m ruff format --check src tests
+
+check: ## Everything CI checks, in CI's order. Run this before you push.
+	@$(MAKE) lint
+	@$(MAKE) typecheck
+	@$(MAKE) test
+	@echo ""
+	@echo "  All green. Safe to push."
 
 fmt: ## Auto-format everything
 	pnpm prettier --write .
