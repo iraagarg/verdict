@@ -1,5 +1,9 @@
 # Walkthrough — learn Verdict by running it
 
+> **New to the project? Read [`START-HERE.md`](START-HERE.md) first.** It is six
+> commands and ten minutes, in plain words. This file is the deeper version and
+> assumes you've done that one.
+
 Thirteen labs. Each one is a thing you type, a thing you see, and the reason it
 matters. Work through them in order; later labs assume earlier ones.
 

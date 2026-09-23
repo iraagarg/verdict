@@ -126,10 +126,15 @@ changed the project most:
 
 ## Running it
 
-New here? [`WALKTHROUGH.md`](WALKTHROUGH.md) is thirteen hands-on labs that take the
-system apart while it runs — streaming, cost arithmetic, client disconnect, the
-circuit breaker, the four verdicts, the rejected cache. Everything in it is free to
-run except one request costing $0.0002.
+New here? Two guides, both hands-on:
+
+- [`START-HERE.md`](START-HERE.md) — six commands, ten minutes, plain words. The
+  whole idea of the project end to end.
+- [`WALKTHROUGH.md`](WALKTHROUGH.md) — thirteen labs taking the system apart while
+  it runs: streaming, cost arithmetic, client disconnect, the circuit breaker, the
+  four verdicts, the rejected cache.
+
+Both are free to run except one request costing $0.0002.
 
 ```bash
 cp .env.example .env          # add at least one provider key
