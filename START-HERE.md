@@ -32,7 +32,7 @@ curl -s localhost:8080/health
 ```
 
 ```json
-{"status":"ok","service":"gateway","uptime_s":37368}
+{ "status": "ok", "service": "gateway", "uptime_s": 37368 }
 ```
 
 **What this is:** your gateway is a small web server. It sits between an app and
@@ -55,7 +55,7 @@ You get back JSON containing `"content": "Paris"`.
 **What just happened:** your gateway took your question, sent it to Groq, got the
 answer, and handed it back to you.
 
-**Why it matters:** that request format is *exactly* OpenAI's format. Any app
+**Why it matters:** that request format is _exactly_ OpenAI's format. Any app
 already written for OpenAI can point at your gateway and work with no changes.
 That is why this is a **gateway** and not a library — you don't have to rewrite
 anything to use it.
@@ -91,7 +91,7 @@ in this project is built on top of this table.
 
 ## Step 4 — Let the gateway choose the model
 
-Instead of naming a model, say `verdict-auto` — meaning *"you pick."*
+Instead of naming a model, say `verdict-auto` — meaning _"you pick."_
 
 ```bash
 curl -s -D - -o /dev/null localhost:8080/v1/chat/completions \
@@ -108,8 +108,8 @@ x-verdict-cost-usd:      0.00016500
 
 **It picked the most expensive model in the list.**
 
-**Why?** Look at `route-reason`: `router_off`. That means *"I have no proof that
-a cheaper model is good enough here."*
+**Why?** Look at `route-reason`: `router_off`. That means _"I have no proof that
+a cheaper model is good enough here."_
 
 **This is the single most important rule in your project:**
 
@@ -175,16 +175,16 @@ Accurate to only +/- 10 points
 Read that slowly, because it is the cleverest part of your project.
 
 Sonnet costs **twice** as much as Haiku. They scored **exactly the same**. Every
-instinct says *switch to Haiku and save half your money.*
+instinct says _switch to Haiku and save half your money._
 
 **Your system says no.** Here is why.
 
 You only tested 60 questions. With 60 questions, your measurement is accurate to
 about ±10 points. So a real gap of 8 points — Haiku genuinely being worse — would
 have produced **exactly the same result you are looking at.** You cannot tell the
-difference between *"they are the same"* and *"I didn't test enough to notice."*
+difference between _"they are the same"_ and _"I didn't test enough to notice."_
 
-So the system reports **INCONCLUSIVE**, which means: *get more data, don't switch yet.*
+So the system reports **INCONCLUSIVE**, which means: _get more data, don't switch yet._
 
 ### Why this is the interesting part
 
@@ -192,10 +192,10 @@ Most tools would print **"no significant difference"** here — and a team would
 read that as "great, they're the same" and switch. That phrase hides two
 completely opposite situations:
 
-| What it could mean | What you should do |
-| --- | --- |
-| We measured carefully and they really are the same | Switch. Save the money. |
-| We didn't measure enough to tell | Do **not** switch. You know nothing. |
+| What it could mean                                 | What you should do                   |
+| -------------------------------------------------- | ------------------------------------ |
+| We measured carefully and they really are the same | Switch. Save the money.              |
+| We didn't measure enough to tell                   | Do **not** switch. You know nothing. |
 
 Your system splits those into two different answers — **EQUIVALENT** and
 **INCONCLUSIVE** — so they can never be confused. That one distinction is the
@@ -224,10 +224,10 @@ The summary of everything you have actually proven.
 
 **"Measured results"** — two coloured boxes:
 
-| | |
-| --- | --- |
-| 🟡 **INCONCLUSIVE** `haiku → sonnet` | Effect 0.00pp, n=60 — *can't tell, need more data* |
-| 🟢 **IMPROVEMENT** `gpt-oss-20b → haiku` | Effect 16.07pp, n=56 — *haiku is genuinely better* |
+|                                          |                                                    |
+| ---------------------------------------- | -------------------------------------------------- |
+| 🟡 **INCONCLUSIVE** `haiku → sonnet`     | Effect 0.00pp, n=60 — _can't tell, need more data_ |
+| 🟢 **IMPROVEMENT** `gpt-oss-20b → haiku` | Effect 16.07pp, n=56 — _haiku is genuinely better_ |
 
 Those two boxes together are the proof your system works. Given a **real** gap it
 committed immediately (green). Given **no visible** gap it refused to conclude
@@ -237,7 +237,7 @@ useless; a system that always concluded would be dangerous. Yours does both corr
 **"Model pass rates"** — how many questions each model got right. Haiku and Sonnet
 both 81.7%, the cheap open model 63.3%.
 
-**"Semantic cache"** — says *"Chosen threshold: none — unsafe."* You built a
+**"Semantic cache"** — says _"Chosen threshold: none — unsafe."_ You built a
 feature, measured it, and it failed. The dashboard reports that instead of hiding it.
 
 **"Traffic"** — 241 requests sampled out of 1,145 in the database, $0.50 spent.
@@ -248,7 +248,7 @@ feature, measured it, and it failed. The dashboard reports that instead of hidin
 
 **The top half is empty, and that is correct.**
 
-> *"No routing policy has been fitted."*
+> _"No routing policy has been fitted."_
 
 It then tells you exactly which two commands would fill it in. This is what an honest
 empty state looks like — not a spinner, not a fake chart, not zeros. It says what is
@@ -256,13 +256,13 @@ missing and how to produce it.
 
 **The bottom half is the cache table**, and it is worth reading carefully:
 
-| Threshold | Hit rate | False hits | Safe? |
-| --- | --- | --- | --- |
-| 0.800 | 65.0% | 42.50% | no |
-| 0.850 | 51.0% | 14.17% | no |
-| 0.900 | 32.0% | 3.33% | no |
-| 0.950 | 12.0% | 1.33% | no |
-| 1.000 | **0.0%** | 0.00% | **yes** |
+| Threshold | Hit rate | False hits | Safe?   |
+| --------- | -------- | ---------- | ------- |
+| 0.800     | 65.0%    | 42.50%     | no      |
+| 0.850     | 51.0%    | 14.17%     | no      |
+| 0.900     | 32.0%    | 3.33%      | no      |
+| 0.950     | 12.0%    | 1.33%      | no      |
+| 1.000     | **0.0%** | 0.00%      | **yes** |
 
 **How to read it.** "Threshold" is how similar two questions must be before you reuse
 an old answer. Loose at the top, strict at the bottom.
@@ -302,8 +302,8 @@ The bottom chart stacks spend by hour and by model.
 
 The most important page. It opens by explaining itself:
 
-> **Four verdicts, not three.** *Equivalent* means the difference was measured
-> precisely and is small. *Inconclusive* means it was not measured precisely enough to
+> **Four verdicts, not three.** _Equivalent_ means the difference was measured
+> precisely and is small. _Inconclusive_ means it was not measured precisely enough to
 > say. Reporting both as "no significant difference" is how an underpowered run gets
 > mistaken for a pass.
 
@@ -333,7 +333,7 @@ Other fields:
 - **Discordant 8** — questions where the two models disagreed. Only these carry
   information; the 52 they both got right or both got wrong tell you nothing
 - **McNemar p 1.000000** — as strong an "identical" as a p-value ever gets, and the
-  system *still* refused to conclude, because a p-value answers the wrong question
+  system _still_ refused to conclude, because a p-value answers the wrong question
 
 ---
 
@@ -351,7 +351,7 @@ Then find **"Say exactly: hello from verdict"** and click **Replay stream**, wit
 
 The caption under it is the detail worth noticing:
 
-> *Reconstructed from a measured TTFT of 495ms and 546ms total — not a per-token recording.*
+> _Reconstructed from a measured TTFT of 495ms and 546ms total — not a per-token recording._
 
 It tells you it is a **reconstruction**, not a recording. It would have been easy to
 let people assume otherwise.
@@ -360,13 +360,13 @@ let people assume otherwise.
 
 ## What the whole site is really demonstrating
 
-| The page shows | The habit it demonstrates |
-| --- | --- |
-| `/pareto` empty, with the command to fill it | Say "not measured", never fake it |
-| Cache table with both rates side by side | Never show a benefit without its cost |
-| `/compare` interval drawn to scale | Make "we don't know" *visible*, not a footnote |
-| Replay labelled a reconstruction | Don't let people assume more than you measured |
-| Footer on every page | A number not in `artifacts/` does not exist |
+| The page shows                               | The habit it demonstrates                      |
+| -------------------------------------------- | ---------------------------------------------- |
+| `/pareto` empty, with the command to fill it | Say "not measured", never fake it              |
+| Cache table with both rates side by side     | Never show a benefit without its cost          |
+| `/compare` interval drawn to scale           | Make "we don't know" _visible_, not a footnote |
+| Replay labelled a reconstruction             | Don't let people assume more than you measured |
+| Footer on every page                         | A number not in `artifacts/` does not exist    |
 
 ---
 
@@ -377,7 +377,7 @@ The terminal showed you what it **does**:
 1. A gateway that speaks OpenAI's language, so any OpenAI app works with it
 2. Every request recorded, costed, and timed
 3. A router that fails **expensive**, never cheap
-4. Statistics honest enough to say *"I don't know"*
+4. Statistics honest enough to say _"I don't know"_
 
 The dashboard showed you what it **found**:
 

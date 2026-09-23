@@ -96,15 +96,15 @@ in this README was typed by hand; every figure is read from `artifacts/`.
 
 ## What each piece does
 
-| Component         | Role                                                                                                                                    |
-| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `apps/gateway`    | TypeScript + Fastify. OpenAI-compatible proxy, SSE streaming, three provider adapters, exact cost accounting, circuit breaker, routing. |
-| `apps/evald`      | Python + FastAPI. Corpus assembly, replay runner, LLM judge, calibration, statistics, policy fitting.                                   |
+| Component         | Role                                                                                                                                                         |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `apps/gateway`    | TypeScript + Fastify. OpenAI-compatible proxy, SSE streaming, three provider adapters, exact cost accounting, circuit breaker, routing.                      |
+| `apps/evald`      | Python + FastAPI. Corpus assembly, replay runner, LLM judge, calibration, statistics, policy fitting.                                                        |
 | `apps/dashboard`  | Next.js. Pareto curve, spend by model, run comparison with the verdict drawn to scale, trace explorer with streaming replay. Reads committed artifacts only. |
-| `packages/shared` | Shared TypeScript types and Zod schemas.                                                                                                |
-| `config/`         | Model ladder and pricing. Every price cites its source and the date verified.                                                           |
-| `corpus/`         | 1,500 frozen benchmark items with per-item provenance and licence.                                                                      |
-| `artifacts/`      | Committed measurements. The only source of any number.                                                                                  |
+| `packages/shared` | Shared TypeScript types and Zod schemas.                                                                                                                     |
+| `config/`         | Model ladder and pricing. Every price cites its source and the date verified.                                                                                |
+| `corpus/`         | 1,500 frozen benchmark items with per-item provenance and licence.                                                                                           |
+| `artifacts/`      | Committed measurements. The only source of any number.                                                                                                       |
 
 ### Design decisions worth a look
 

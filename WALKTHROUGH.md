@@ -33,19 +33,19 @@ docker compose up -d --build   # rebuild from source and start
 docker compose ps -a           # -a matters: see below
 ```
 
-Six services. Five stay up; one is *supposed* to exit:
+Six services. Five stay up; one is _supposed_ to exit:
 
-| Service | Job | State when healthy |
-| --- | --- | --- |
-| `postgres` | every trace, every vector | Up (healthy) |
-| `redis` | hot cache path | Up (healthy) |
-| `migrate` | applies `db/migrations/*.sql` once, then exits | **Exited (0)** |
-| `gateway` | the OpenAI-compatible API | Up (healthy) |
-| `evald` | the replay / eval service | Up (healthy) |
-| `dashboard` | the Next.js site | Up |
+| Service     | Job                                            | State when healthy |
+| ----------- | ---------------------------------------------- | ------------------ |
+| `postgres`  | every trace, every vector                      | Up (healthy)       |
+| `redis`     | hot cache path                                 | Up (healthy)       |
+| `migrate`   | applies `db/migrations/*.sql` once, then exits | **Exited (0)**     |
+| `gateway`   | the OpenAI-compatible API                      | Up (healthy)       |
+| `evald`     | the replay / eval service                      | Up (healthy)       |
+| `dashboard` | the Next.js site                               | Up                 |
 
 **Use `docker compose ps -a`, not `ps`.** Plain `ps` hides exited containers, so
-`migrate` is invisible — and a *failed* migration looks exactly like a healthy
+`migrate` is invisible — and a _failed_ migration looks exactly like a healthy
 stack. That is the one service whose status you most need to see.
 
 **`migrate` exiting with code 0 is success, not failure.** Check it ran:
@@ -57,10 +57,10 @@ docker compose logs migrate | tail -20
 > **Why this service exists.** Postgres has a built-in hook that runs SQL on
 > first boot. It is silently skipped if the data volume already exists. Earlier
 > in this project a stale `verdict_pgdata` volume from an unrelated project meant
-> the migrations never ran — and *every container reported healthy*. A one-shot
+> the migrations never ran — and _every container reported healthy_. A one-shot
 > service that must exit 0 before the gateway starts cannot fail silently.
 
-**Always rebuild after changing source.** `docker compose up -d` alone will *not*
+**Always rebuild after changing source.** `docker compose up -d` alone will _not_
 pick up your changes. The dashboard container in this repo once ran eight days
 stale, serving an old build, with no warning anywhere.
 
@@ -125,7 +125,7 @@ span your terminal, the gateway, and evald.
 
 ---
 
-## Lab 2 — Follow the money 💸 *(costs ~$0.0002)*
+## Lab 2 — Follow the money 💸 _(costs ~$0.0002)_
 
 **What you'll learn:** why every price in this codebase is an integer.
 
@@ -145,11 +145,11 @@ grep -A 8 "openai/gpt-oss-20b:" config/models.yaml
 ```
 
 ```yaml
-    pricing:
-      input: 0.075      # USD per million tokens
-      output: 0.30
-      verified_at: "2026-09-14"
-      source: "https://console.groq.com/docs/models"
+pricing:
+  input: 0.075 # USD per million tokens
+  output: 0.30
+  verified_at: "2026-09-14"
+  source: "https://console.groq.com/docs/models"
 ```
 
 > Every price carries `verified_at` and `source`, and the Zod schema **rejects the
@@ -210,7 +210,7 @@ Read those five fields carefully:
 - **`output_tokens 0`, `cost_usd 0`** — the upstream call was **aborted**. Groq
   stopped generating. Nobody paid for tokens nobody read.
 - **`usage_is_final = f`** — the important one. It does **not** claim the cost was
-  zero. It says *"this figure is unconfirmed."* The provider never sent a final
+  zero. It says _"this figure is unconfirmed."_ The provider never sent a final
   usage report, so the number is a floor, not a fact.
 
 Prove the flag is load-bearing:
@@ -221,7 +221,7 @@ SELECT usage_is_final, count(*), round(sum(cost_usd), 6) AS usd
 FROM traces GROUP BY 1 ORDER BY 1;"
 ```
 
-You can now answer *"how much of my billing data do I actually trust?"* — and there
+You can now answer _"how much of my billing data do I actually trust?"_ — and there
 is a partial index built for exactly that question:
 
 ```bash
@@ -229,7 +229,7 @@ cat db/migrations/0002_usage_finality.sql
 ```
 
 > **The bug that makes this lab worth doing.** The obvious way to detect a
-> disconnect is to listen on the *request* object. That is wrong: an
+> disconnect is to listen on the _request_ object. That is wrong: an
 > `IncomingMessage` fires `close` when the request **body** finishes being read —
 > which for a POST is immediately. Every streaming request looked like an instant
 > disconnect, cancelled its own upstream call, and returned an empty HTTP 200 with
@@ -288,7 +288,7 @@ sed -n '69,84p' apps/gateway/src/providers/types.ts
 
 > A circuit breaker exists to stop calling a **broken** service. HTTP 429 does not
 > mean broken — it means healthy and asking you to slow down. The correct responses
-> are opposite: one is *stop*, the other is *pace yourself*.
+> are opposite: one is _stop_, the other is _pace yourself_.
 
 ```bash
 grep -n "countsTowardBreaker" apps/gateway/src/providers/anthropic.ts
@@ -338,7 +338,7 @@ the rule, and the rule is deliberate:
 
 > **Ambiguity resolves toward quality.** No policy, no route hint, an unknown route,
 > a disabled router — every one of those serves a strong model. Cost optimisation
-> happens *only* where there is positive evidence it is safe.
+> happens _only_ where there is positive evidence it is safe.
 
 The failure mode this prevents: a config typo, a missing file, or an unrecognised
 route silently downgrading production traffic to a cheap model. **Fail expensive,
@@ -352,7 +352,7 @@ never fail cheap.**
 
 **This is the most important lab.** It is the heart of the project.
 
-The problem: *"no significant difference"* means two opposite things. Either you
+The problem: _"no significant difference"_ means two opposite things. Either you
 measured carefully and they really are the same (**switch and save money**), or you
 didn't measure enough to tell (**you know nothing**). Most tools report both the
 same way. Yours doesn't.
@@ -393,10 +393,10 @@ cd ../..
 Three things to notice in the output:
 
 1. **At n=60 the effect estimate is wildly wrong** — around −0.18 when the truth is
-   −0.08. Small samples don't just add noise, they *exaggerate*. Only by n=667 does
+   −0.08. Small samples don't just add noise, they _exaggerate_. Only by n=667 does
    the estimate land near the truth.
 2. **In the identical case it never reaches EQUIVALENT until n≥2000.** It is not
-   being difficult; an interval wider than the ±0.03 margin *cannot fit inside it*,
+   being difficult; an interval wider than the ±0.03 margin _cannot fit inside it_,
    however the estimate falls. The `can_demonstrate_equivalence` field says so
    explicitly.
 3. **One run says INCONCLUSIVE while excluding zero.** The difference is real but
@@ -441,10 +441,10 @@ cd ../..
 
 Two numbers matter:
 
-- **False alarms ≈ 4%** against a nominal α of 5%. The statistics are *calibrated*,
+- **False alarms ≈ 4%** against a nominal α of 5%. The statistics are _calibrated_,
   not hand-waved. You can state this in an interview and it is checkable in 20 seconds.
 - **EQUIVALENT: 0 out of 200.** On truly identical models at n=60, your system never
-  once said *"these are the same, go save money."* The dangerous error isn't rare —
+  once said _"these are the same, go save money."_ The dangerous error isn't rare —
   it is structurally impossible at that sample size.
 
 And the punchline: noise alone manufactured apparent gaps up to **±0.28**. Your real
@@ -494,7 +494,7 @@ PY
 cd ../..
 ```
 
-The balls-and-boxes pair scores **~0.998** — *higher* than either genuine paraphrase
+The balls-and-boxes pair scores **~0.998** — _higher_ than either genuine paraphrase
 (~0.94). Two words swapped, completely different answers, and the embedding model
 cannot tell. **There is no threshold between 0.998 and 0.94.** Any cutoff that
 catches real paraphrases also serves wrong answers.
@@ -522,14 +522,14 @@ gateway ships no cache.**
 
 Two details that make this a result rather than a failure:
 
-- **The negatives are hard by construction** — each item paired with its *nearest
-  different neighbour*. Random negatives are trivially separable and would flatter
+- **The negatives are hard by construction** — each item paired with its _nearest
+  different neighbour_. Random negatives are trivially separable and would flatter
   any threshold you like.
 - **The bound is Clopper-Pearson, not bootstrap.** A bootstrap reports exactly 0.00%
   when it observes zero errors — which would let a completely untested threshold look
-  proven. Since the threshold gets chosen *on that upper bound*, the cache would have
+  proven. Since the threshold gets chosen _on that upper bound_, the cache would have
   been loosened on an artefact of the method. Clopper-Pearson turns 0/150 into
-  *"up to 2.43%"*, and gives you the rule: proving <1% needs **≥368** hard negatives.
+  _"up to 2.43%"_, and gives you the rule: proving <1% needs **≥368** hard negatives.
 
 📖 Read: `apps/evald/src/evald/cache/calibrate.py`, `stats/proportion.py`, **D-046**, **D-047**, **D-051**
 
@@ -591,13 +591,13 @@ open http://localhost:3000
 
 Visit all five pages. **Two of them are deliberately empty:**
 
-| Page | State | Why |
-| --- | --- | --- |
-| `/` | overview | — |
-| `/pareto` | **empty** | no routing policy fitted — needs a full judged replay |
-| `/spend` | real data | from the committed trace sample |
-| `/compare` | real data | your two verdict artifacts |
-| `/traces` | real data | stratified sample, replayable |
+| Page       | State     | Why                                                   |
+| ---------- | --------- | ----------------------------------------------------- |
+| `/`        | overview  | —                                                     |
+| `/pareto`  | **empty** | no routing policy fitted — needs a full judged replay |
+| `/spend`   | real data | from the committed trace sample                       |
+| `/compare` | real data | your two verdict artifacts                            |
+| `/traces`  | real data | stratified sample, replayable                         |
 
 The empty states are the point. `/pareto` tells you exactly which command would
 produce the data. The dashboard reads **committed JSON files only** — never a
@@ -636,15 +636,15 @@ sed -n '1,60p' apps/ghapp/src/signature.ts
 
 Four properties, and each one is a specific attack:
 
-| Property | Attack it stops |
-| --- | --- |
-| HMAC-SHA256 over the **raw bytes** | re-serialising JSON changes the bytes and breaks the signature |
-| `timingSafeEqual`, never `===` | a timing side-channel leaks the signature byte by byte |
+| Property                             | Attack it stops                                                                   |
+| ------------------------------------ | --------------------------------------------------------------------------------- |
+| HMAC-SHA256 over the **raw bytes**   | re-serialising JSON changes the bytes and breaks the signature                    |
+| `timingSafeEqual`, never `===`       | a timing side-channel leaks the signature byte by byte                            |
 | **shape-validated before** comparing | `timingSafeEqual` throws on a length mismatch; an attacker gets a different error |
-| bounded, TTL'd delivery log | replaying a captured valid request |
+| bounded, TTL'd delivery log          | replaying a captured valid request                                                |
 
 The ordering in that third row matters and is easy to get wrong: you must check the
-signature *looks* like a signature before you compare it, or the error you return
+signature _looks_ like a signature before you compare it, or the error you return
 tells the attacker something.
 
 📖 Read: `apps/ghapp/src/signature.ts`, `apps/ghapp/src/index.ts`
@@ -659,7 +659,7 @@ tells the attacker something.
 grep -oE '^  it\("[^"]+' apps/gateway/src/routes/chat.test.ts | sed 's/^  it("//'
 ```
 
-The test names *are* the spec:
+The test names _are_ the spec:
 
 ```
 streams rather than buffering: chunks arrive before the upstream finishes

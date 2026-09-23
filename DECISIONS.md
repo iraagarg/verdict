@@ -1583,7 +1583,7 @@ by reading code or running tests.
    `docker compose up -d` does not rebuild a service whose source has changed.
 
 **Decision.** `COPY artifacts artifacts` in the build stage. The export script's `note` states the
-actual sampling method. `/traces` no longer corrects the artifact in the page; it explains *why*
+actual sampling method. `/traces` no longer corrects the artifact in the page; it explains _why_
 stratification matters instead.
 
 **Alternatives rejected.** _Mount `artifacts/` as a compose volume_ — fixes the local container and
@@ -1594,7 +1594,7 @@ visually while the committed artifact still misdescribes itself, and any other c
 file inherits the wrong claim.
 
 **Consequence, and the lesson that generalises.** An empty state is indistinguishable from a
-missing measurement. That ambiguity is *correct* for this project — most artifacts genuinely have
+missing measurement. That ambiguity is _correct_ for this project — most artifacts genuinely have
 not been produced yet — which is exactly why it hid a packaging bug for a whole phase. Where
 absence is a legitimate state, absence cannot also serve as the error signal. A build-time assertion
 that at least one artifact resolved would have caught this immediately, and P8 should add one.
