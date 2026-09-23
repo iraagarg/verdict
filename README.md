@@ -108,7 +108,7 @@ in this README was typed by hand; every figure is read from `artifacts/`.
 
 ### Design decisions worth a look
 
-[`DECISIONS.md`](DECISIONS.md) records 43 decisions with their rejected alternatives. The ones that
+[`DECISIONS.md`](DECISIONS.md) records 56 decisions with their rejected alternatives. The ones that
 changed the project most:
 
 - **[D-034](DECISIONS.md)** — why a paired bootstrap rather than a t-test, in plain language
@@ -125,6 +125,11 @@ changed the project most:
 ---
 
 ## Running it
+
+New here? [`WALKTHROUGH.md`](WALKTHROUGH.md) is thirteen hands-on labs that take the
+system apart while it runs — streaming, cost arithmetic, client disconnect, the
+circuit breaker, the four verdicts, the rejected cache. Everything in it is free to
+run except one request costing $0.0002.
 
 ```bash
 cp .env.example .env          # add at least one provider key
