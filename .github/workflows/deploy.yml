@@ -1,0 +1,160 @@
+# Deploy on green main.
+#
+# Order is the point: test -> migrate -> deploy. Migrations run BEFORE any code
+# that depends on them is serving traffic, because the alternative is a window
+# where the new gateway is live against the old schema.
+#
+# Every deploy job is gated on its secret actually existing. Until the accounts
+# are wired up this workflow reports success having deployed nothing, rather
+# than painting main red for a deployment that was never configured. What it
+# will not do is hide that: the run summary lists which targets were configured.
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  # One deploy at a time. A second push while the first is mid-migration would
+  # race two schema changes against one database.
+  group: deploy-main
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    name: Which targets are configured?
+    runs-on: ubuntu-latest
+    outputs:
+      neon: ${{ steps.check.outputs.neon }}
+      railway: ${{ steps.check.outputs.railway }}
+      vercel: ${{ steps.check.outputs.vercel }}
+    steps:
+      - id: check
+        env:
+          NEON: ${{ secrets.DATABASE_URL }}
+          RAILWAY: ${{ secrets.RAILWAY_TOKEN }}
+          VERCEL: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          have() { [ -n "$1" ] && echo "true" || echo "false"; }
+          {
+            echo "neon=$(have "$NEON")"
+            echo "railway=$(have "$RAILWAY")"
+            echo "vercel=$(have "$VERCEL")"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "### Deploy targets"
+            echo "| target | configured |"
+            echo "| --- | --- |"
+            echo "| Neon (migrations) | $(have "$NEON") |"
+            echo "| Railway (gateway) | $(have "$RAILWAY") |"
+            echo "| Vercel (dashboard) | $(have "$VERCEL") |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @verdict/shared build && pnpm --filter @verdict/ghapp build
+      - run: pnpm lint
+      - run: pnpm format:check
+      - run: pnpm -r typecheck
+      - run: pnpm -r test
+
+      - name: Python
+        working-directory: apps/evald
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -q -e '.[dev]'
+          .venv/bin/python -m ruff check src tests
+          .venv/bin/python -m ruff format --check src tests
+          .venv/bin/python -m mypy src tests
+          .venv/bin/python -m pytest -q
+
+  migrate:
+    name: Migrate Neon
+    needs: [preflight, test]
+    if: needs.preflight.outputs.neon == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install psql
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client
+      - name: Apply migrations
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        # The same script docker compose and CI use. One migration path.
+        run: ./tools/migrate.sh
+
+  deploy-gateway:
+    name: Deploy gateway (Railway)
+    needs: [preflight, test, migrate]
+    # `always()` so a skipped migrate (Neon not configured) does not cascade into
+    # a skipped deploy, while a FAILED migrate still blocks it.
+    if: |
+      always() &&
+      needs.preflight.outputs.railway == 'true' &&
+      needs.test.result == 'success' &&
+      needs.migrate.result != 'failure'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Deploy
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          npm i -g @railway/cli@4
+          railway up --service gateway --ci
+
+      - name: Verify the deployed gateway is actually healthy
+        if: ${{ vars.GATEWAY_URL != '' }}
+        env:
+          URL: ${{ vars.GATEWAY_URL }}
+        # A deploy that reports success while the service 503s is not a success.
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS "$URL/health" >/dev/null 2>&1; then
+              echo "healthy after ${i} attempt(s)"
+              curl -fsS "$URL/health"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "gateway did not become healthy at $URL/health" >&2
+          exit 1
+
+  deploy-dashboard:
+    name: Deploy dashboard (Vercel)
+    needs: [preflight, test]
+    if: needs.preflight.outputs.vercel == 'true' && needs.test.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Deploy
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        # The dashboard reads artifacts/ at BUILD time and bakes the values in
+        # (D-052, D-056), so it needs no runtime secrets and no database.
+        run: |
+          npm i -g vercel@latest
+          vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+          vercel build --prod --token="$VERCEL_TOKEN"
+          vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN"

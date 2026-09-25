@@ -65,12 +65,32 @@ export const EnvSchema = z
       .refine((v) => v.startsWith("postgres://") || v.startsWith("postgresql://"), {
         message: "must be a postgres:// or postgresql:// URL",
       }),
-    REDIS_URL: z
-      .string()
-      .url()
-      .refine((v) => v.startsWith("redis://") || v.startsWith("rediss://"), {
-        message: "must be a redis:// or rediss:// URL",
-      }),
+    /**
+     * OPTIONAL, deliberately.
+     *
+     * Redis was to be the hot path of the semantic cache. P6 measured that cache
+     * against 200 paraphrases and 600 hard negatives and found no threshold that
+     * was both safe and useful (D-046, D-047), so it is not deployed and no
+     * Redis client is installed. Requiring a connection string the process will
+     * never open would mean every deployment provisions a service to satisfy a
+     * schema — the dependency outliving the feature that justified it.
+     *
+     * The validation stays because the shape is still worth checking the moment
+     * a value IS supplied: a wrong URL should fail at boot, not on the first
+     * cache read. Made optional in P8 (D-059).
+     */
+    REDIS_URL: z.preprocess(
+      // Blank means absent, matching every other optional here: compose passes
+      // `${VAR:-}` as "" and that must not read as a malformed URL (D-013).
+      (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+      z
+        .string()
+        .url()
+        .refine((v) => v.startsWith("redis://") || v.startsWith("rediss://"), {
+          message: "must be a redis:// or rediss:// URL",
+        })
+        .optional(),
+    ),
 
     ANTHROPIC_API_KEY: apiKey,
     OPENAI_API_KEY: apiKey,

@@ -68,7 +68,21 @@ describe("loadEnv", () => {
     );
   });
 
-  it("rejects a REDIS_URL that is not redis", () => {
+  it("boots with no REDIS_URL at all", () => {
+    // The semantic cache was measured and rejected (D-046/D-047), so nothing
+    // connects to Redis. Requiring the URL would make every deployment
+    // provision a service purely to satisfy a schema (D-059).
+    const { REDIS_URL: _omitted, ...withoutRedis } = BASE;
+    expect(loadEnv(withoutRedis).REDIS_URL).toBeUndefined();
+  });
+
+  it("treats a blank REDIS_URL as absent, the way compose passes it", () => {
+    expect(loadEnv(withEnv({ REDIS_URL: "" })).REDIS_URL).toBeUndefined();
+  });
+
+  it("still rejects a REDIS_URL that is present but not redis", () => {
+    // Optional does not mean unvalidated: a wrong value must fail at boot,
+    // not on the first cache read.
     expect(() => loadEnv(withEnv({ REDIS_URL: "http://localhost:6379" }))).toThrow(/redis/);
   });
 

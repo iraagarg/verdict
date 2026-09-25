@@ -1626,7 +1626,7 @@ and supplies exactly the context that makes the 1ms figure meaningful.
 through the gateway while the baseline streamed, and reported the gateway as **faster than not
 having a gateway** — p50 −5ms. The arithmetic was correct; the experiment was not. In the baseline
 the load generator parsed every SSE frame itself, while through the gateway it read one small JSON
-body and the *gateway* absorbed the parsing. Two different client workloads, so the difference was
+body and the _gateway_ absorbed the parsing. Two different client workloads, so the difference was
 never the gateway. Both arms now stream, `bytes_per_request_mean` is recorded on each so the
 asymmetry is visible in the artifact, and the runner **exits non-zero on a negative p50** rather
 than publishing a flattering impossibility.
@@ -1664,5 +1664,41 @@ new feature work, and shipping a service in order to justify a deployment plan i
 **Consequence.** The FastAPI app stays for local `docker compose up` parity and as the seam where a
 future API would land. The deployment docs say why it is absent, so its absence reads as a decision
 rather than an omission.
+
+---
+
+## D-059 — REDIS_URL becomes optional: the dependency outlived the feature
+
+**Status:** ACCEPTED · **Date:** 2026-09-25 · **Phase:** P8 · **Amends D-006**
+
+**Decision.** `REDIS_URL` is optional. It is still shape-validated when supplied, and a blank string
+reads as absent (D-013). Upstash is dropped from the deployment entirely.
+
+**What was found.** Writing the deployment guide meant listing the services to provision, which
+meant asking what each one is for. `REDIS_URL` appears in exactly one place in the gateway: the env
+schema that requires it. There is no Redis client in any `package.json`, no connection is opened,
+and nothing reads the value. The gateway was refusing to start without a connection string it would
+never use.
+
+**Why it happened, which is the interesting part.** Redis was to be the hot path of the semantic
+cache. P6 built that cache, calibrated it against 200 paraphrases and 600 hard negatives, and found
+no threshold both safe and useful (D-046, D-047) — so it was not deployed. The feature was removed
+on the evidence and the requirement it had justified was left behind. Nothing failed, because a
+required-but-unused variable is invisible while every environment happens to set it. It only
+surfaced when a human had to justify a signup.
+
+**Alternatives rejected.** _Keep it required and provision Upstash_ — matches the original plan and
+makes every deployment stand up a service to satisfy a schema; an interviewer who greps for the
+client finds nothing. _Delete `REDIS_URL` outright_ — cleanest possible config, but it removes the
+seam, so adding a cache later means touching the schema, compose, CI and tests again for no gain.
+
+**Consequence, and the general rule.** Optional does not mean unvalidated: a malformed value still
+fails at boot, which is the entire point of D-006. Two tests now pin the behaviour — boots with the
+variable absent, still rejects `http://` when present.
+
+The rule this earns: **a boot-time requirement is a claim that the process cannot work without it.**
+When a feature is cut, its requirements must be cut with it, or the schema starts asserting things
+that are no longer true. D-006 buys trust in the environment contract, and that trust is only worth
+something if every entry in it is still load-bearing.
 
 ---
