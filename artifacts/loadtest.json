@@ -1,0 +1,85 @@
+{
+  "artifact_version": 1,
+  "created_at": "2026-09-25T14:04:04Z",
+  "git_sha": "4a85e1f163d3bd0297244b19177b3fea29d4086e",
+  "tool": "autocannon",
+  "tool_version": "8.0.0",
+  "host": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "cpus": 10,
+    "node": "v26.5.0"
+  },
+  "load": {
+    "connections": 50,
+    "duration_s": 20,
+    "warmup_s": 5,
+    "request": "POST /v1/chat/completions, non-streaming, ~40 output tokens"
+  },
+  "upstream": "controlled mock speaking Anthropic SSE over a real socket",
+  "baseline_mock_direct": {
+    "latency_ms": {
+      "p50": 18,
+      "p90": 19,
+      "p95": 20,
+      "p99": 20,
+      "mean": 17.49,
+      "max": 28
+    },
+    "requests_per_second_mean": 2781.7,
+    "requests_total": 55627,
+    "bytes_per_request_mean": 1655,
+    "non_2xx": 0,
+    "errors": 0,
+    "timeouts": 0
+  },
+  "through_gateway": {
+    "latency_ms": {
+      "p50": 18,
+      "p90": 21,
+      "p95": 23,
+      "p99": 26,
+      "mean": 18.39,
+      "max": 94
+    },
+    "requests_per_second_mean": 2646.5,
+    "requests_total": 52925,
+    "bytes_per_request_mean": 2206,
+    "non_2xx": 0,
+    "errors": 0,
+    "timeouts": 0
+  },
+  "overhead_by_percentile_difference_ms": {
+    "p50": 0,
+    "p90": 2,
+    "p95": 3,
+    "p99": 6,
+    "mean": 0.9
+  },
+  "sustained_requests_per_minute": 158790,
+  "end_to_end_real_provider": {
+    "latency_ms": {
+      "p50": 795,
+      "p90": 979,
+      "p95": 1231,
+      "p99": 1231,
+      "mean": 797.38,
+      "max": 1231
+    },
+    "requests_per_second_mean": 2.4,
+    "requests_total": 24,
+    "bytes_per_request_mean": 2214,
+    "non_2xx": 0,
+    "errors": 0,
+    "timeouts": 0
+  },
+  "client_bytes_ratio": 1.33,
+  "notes": [
+    "Overhead is measured against a CONTROLLED upstream, not a real provider. A provider's own latency varies by hundreds of ms between identical calls, which is three orders of magnitude above the gateway's contribution; measuring overhead against one would measure the provider.",
+    "The gateway arm delivers MORE bytes to the load generator than the baseline (see client_bytes_ratio): OpenAI's chunk envelope is more verbose than Anthropic's, and translating between them is the gateway's job. That residual asymmetry works AGAINST the gateway — the load generator does more reading on the arm being measured — so the true proxy cost is at most the figure reported here, not more.",
+    "`overhead_by_percentile_difference_ms` subtracts percentile from percentile. That is NOT the percentile of the added latency: the slowest 1% of each run need not be the same requests. Both raw distributions are recorded so the subtraction can be checked.",
+    "Non-streaming requests. Streaming adds per-frame write cost that this figure does not capture; TTFT under load is a separate measurement.",
+    "Trace persistence is ON, against the real local Postgres, because it is part of what the gateway costs in production. The queue is write-behind and bounded (D-018) so it does not block the request path, but measuring with it disabled would flatter the result.",
+    "Single machine, client and both servers on one host. Real deployments add network latency that dwarfs these figures."
+  ]
+}

@@ -25,8 +25,10 @@ export interface MockScript {
 
 export interface MockProvider {
   url: string;
-  /** Requests received, in order. Used to assert retry behaviour. */
+  /** Requests received, in order. Used to assert retry behaviour. Empty when `record` is false. */
   requests: Array<{ body: unknown; headers: Record<string, string | string[] | undefined> }>;
+  /** Requests received. Accurate even when bodies are not retained. */
+  attemptCount: () => number;
   /** Resolves when the server observes the client disconnecting mid-stream. */
   disconnected: Promise<void>;
   /** How many frames were written before the connection ended. */
@@ -78,9 +80,31 @@ export function anthropicScript(
   ];
 }
 
-export async function startMockProvider(initial: MockScript = {}): Promise<MockProvider> {
+export interface MockOptions {
+  /**
+   * Retain every request in `requests` for assertions. Default true, which is
+   * what tests need.
+   *
+   * The load test drives hundreds of thousands of requests through this same
+   * server, and retaining each parsed body would grow the heap until the
+   * upstream — not the gateway — became the bottleneck. That would silently
+   * corrupt the very measurement the load test exists to take, so it passes
+   * false. `attemptCount` stays accurate either way, because the retry tests
+   * index scripts by attempt number.
+   */
+  record?: boolean;
+  /** Bind to a fixed port instead of an ephemeral one. Used by the load test. */
+  port?: number;
+}
+
+export async function startMockProvider(
+  initial: MockScript = {},
+  options: MockOptions = {},
+): Promise<MockProvider> {
+  const record = options.record ?? true;
   let script: MockScript | ((attempt: number) => MockScript) = initial;
   const requests: MockProvider["requests"] = [];
+  let attempts = 0;
   let frames = 0;
   let resolveDisconnect: () => void;
   const disconnected = new Promise<void>((r) => {
@@ -92,11 +116,13 @@ export async function startMockProvider(initial: MockScript = {}): Promise<MockP
     req.on("data", (c: Buffer) => chunks.push(c));
     req.on("end", () => {
       const raw = Buffer.concat(chunks).toString("utf8");
-      const attempt = requests.length;
-      requests.push({
-        body: raw.length > 0 ? (JSON.parse(raw) as unknown) : null,
-        headers: req.headers,
-      });
+      const attempt = attempts++;
+      if (record) {
+        requests.push({
+          body: raw.length > 0 ? (JSON.parse(raw) as unknown) : null,
+          headers: req.headers,
+        });
+      }
 
       const s = typeof script === "function" ? script(attempt) : script;
 
@@ -149,12 +175,13 @@ export async function startMockProvider(initial: MockScript = {}): Promise<MockP
     });
   });
 
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  await new Promise<void>((resolve) => server.listen(options.port ?? 0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
 
   return {
     url: `http://127.0.0.1:${port}`,
     requests,
+    attemptCount: () => attempts,
     disconnected,
     framesWritten: () => frames,
     setScript: (s) => {

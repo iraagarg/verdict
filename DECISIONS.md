@@ -1600,3 +1600,69 @@ absence is a legitimate state, absence cannot also serve as the error signal. A 
 that at least one artifact resolved would have caught this immediately, and P8 should add one.
 
 ---
+
+## D-057 — Proxy overhead is measured against a controlled upstream, not a real provider
+
+**Status:** ACCEPTED · **Date:** 2026-09-25 · **Phase:** P8
+
+**Decision.** The headline latency figure is measured against the in-repo mock provider (D-021),
+which speaks real Anthropic SSE over a real socket. Two arms, identical load, back to back on one
+machine: `client -> mock` and `client -> gateway -> mock`. The difference is the gateway. A small,
+gentle run against real Groq is reported alongside as `end_to_end_real_provider` and is explicitly
+labelled NOT the overhead figure.
+
+**Why not measure overhead against a real provider.** The gateway's contribution is about one
+millisecond. A provider's own latency varies by hundreds of milliseconds between identical calls —
+the measured Groq p50 was 795ms and p95 1231ms, a 436ms spread on the same prompt. The signal is
+three orders of magnitude below the noise. Any "overhead" computed from that is unfalsifiable: it
+cannot be distinguished from a slow afternoon at the provider, so it is not a measurement.
+
+**Alternatives rejected.** _Real provider only_ — sounds more credible and measures nothing;
+also costs money on every re-run, so it could never go in CI. _Mock only_ — gives the clean number
+but leaves no evidence the gateway survives a real network; the end-to-end arm costs almost nothing
+and supplies exactly the context that makes the 1ms figure meaningful.
+
+**The error this caught, which is the part worth telling.** The first version sent `stream: false`
+through the gateway while the baseline streamed, and reported the gateway as **faster than not
+having a gateway** — p50 −5ms. The arithmetic was correct; the experiment was not. In the baseline
+the load generator parsed every SSE frame itself, while through the gateway it read one small JSON
+body and the *gateway* absorbed the parsing. Two different client workloads, so the difference was
+never the gateway. Both arms now stream, `bytes_per_request_mean` is recorded on each so the
+asymmetry is visible in the artifact, and the runner **exits non-zero on a negative p50** rather
+than publishing a flattering impossibility.
+
+**A residual asymmetry, reported rather than hidden.** The gateway arm still delivers 1.33× the
+bytes, because OpenAI's chunk envelope is more verbose than Anthropic's and translating between them
+is the gateway's job. That extra work lands on the arm being measured, so it inflates the result:
+the true proxy cost is **at most** the figure reported, never more. `client_bytes_ratio` is in the
+artifact so a reader can check this rather than take it on trust.
+
+**Consequence.** Percentile subtraction is named `overhead_by_percentile_difference_ms`, not
+"p99 overhead", because the slowest 1% of each arm need not be the same requests. Both raw
+distributions are committed so the subtraction can be recomputed. Figures are single-machine with
+client and both servers on one host; a real deployment adds network latency that dwarfs them, and
+the artifact says so.
+
+---
+
+## D-058 — evald is not deployed
+
+**Status:** ACCEPTED · **Date:** 2026-09-25 · **Phase:** P8
+
+**Decision.** Only the gateway and the dashboard are deployed. `apps/evald` stays a local CLI.
+
+**Rationale.** evald exposes exactly two HTTP routes, `/health` and `/ready`, and nothing calls
+either. Every capability it has — corpus assembly, replay, judging, statistics, policy fitting — is
+driven through `evald.cli` and runs against local files and a cache. Deploying it would mean paying
+for a process whose entire production behaviour is answering its own health check.
+
+**Alternatives rejected.** _Deploy it as briefed_ — matches the plan and buys nothing; an
+interviewer who asks "what does that service do?" gets "nothing" as the honest answer. _Give it a
+real read-only API first, then deploy_ — genuinely useful and a reasonable future phase, but it is
+new feature work, and shipping a service in order to justify a deployment plan is the wrong order.
+
+**Consequence.** The FastAPI app stays for local `docker compose up` parity and as the seam where a
+future API would land. The deployment docs say why it is absent, so its absence reads as a decision
+rather than an omission.
+
+---

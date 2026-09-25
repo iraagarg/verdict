@@ -66,6 +66,11 @@ label: ## Hand-label sampled pairs for judge calibration (blind, resumable, free
 calibrate: ## Judge the labelled pairs and write calibration_report.json
 	cd apps/evald && .venv/bin/python -m evald.cli calibrate --pairs $(PAIRS) --judge-model $(JUDGE)
 
+loadtest: ## Measure proxy overhead and sustained throughput. Free; writes artifacts/loadtest.json
+	@test -f .env || (echo "need .env (the real-provider arm reads GROQ_API_KEY from it)" && exit 1)
+	docker compose up -d postgres redis
+	set -a && . ./.env && set +a && cd apps/gateway && pnpm loadtest
+
 traces: ## Export a stratified trace sample for the dashboard (free)
 	./tools/export-traces.sh $(PER_MODEL)
 

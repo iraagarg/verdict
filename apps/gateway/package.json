@@ -8,7 +8,8 @@
     "dev": "node --watch --experimental-strip-types src/index.ts",
     "start": "node dist/index.js",
     "typecheck": "tsc -b --noEmit false --emitDeclarationOnly",
-    "test": "vitest run"
+    "test": "vitest run",
+    "loadtest": "tsc -b && node dist/loadtest/run.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.125.0",
@@ -20,8 +21,10 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@types/autocannon": "^7.12.7",
     "@types/node": "^22.10.2",
     "@types/pg": "^8.23.1",
+    "autocannon": "^8.0.0",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
   }
