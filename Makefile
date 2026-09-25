@@ -7,11 +7,16 @@ install: ## Install all JS and Python dependencies
 	pnpm install --frozen-lockfile || pnpm install
 	cd apps/evald && python3.12 -m venv .venv && .venv/bin/pip install -q -e ".[dev]"
 
-up: ## Start the full stack (postgres, redis, gateway, evald, dashboard)
-	docker compose up --build -d
-	@echo "gateway   → http://localhost:8080/health"
-	@echo "evald     → http://localhost:8000/health"
-	@echo "dashboard → http://localhost:3000"
+up: ## Start the full stack from a clean clone. The only command a newcomer needs.
+	@test -f .env || (cp .env.example .env && \
+	  echo "wrote .env from .env.example -- add a provider key when you want live requests")
+	docker compose up --build -d --wait
+	@echo ""
+	@echo "  gateway   -> http://localhost:8080/health"
+	@echo "  evald     -> http://localhost:8000/health"
+	@echo "  dashboard -> http://localhost:3000"
+	@echo ""
+	@echo "  next: open START-HERE.md"
 
 down: ## Stop the stack and remove volumes
 	docker compose down -v
@@ -34,6 +39,7 @@ typecheck: ## Type-check TypeScript and Python
 lint: ## Lint everything
 	pnpm lint
 	pnpm format:check
+	python3 tools/verify-readme.py
 	cd apps/evald && .venv/bin/python -m ruff check src tests
 	cd apps/evald && .venv/bin/python -m ruff format --check src tests
 

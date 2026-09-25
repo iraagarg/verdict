@@ -12,6 +12,49 @@ a statistical quality floor.
 
 ---
 
+## Architecture
+
+```mermaid
+flowchart LR
+    App["Your app<br/><i>OpenAI SDK, baseURL swapped</i>"] -->|POST /v1/chat/completions| GW
+
+    subgraph GW["apps/gateway · TypeScript + Fastify"]
+        direction TB
+        R["Router<br/><i>ambiguity → safe_default</i>"]
+        C["Cost meter<br/><i>integer nano-USD</i>"]
+        B["Circuit breaker<br/><i>per provider</i>"]
+        Q["Trace queue<br/><i>write-behind, bounded</i>"]
+        R --> C --> B
+        C -.-> Q
+    end
+
+    B -->|SSE| P1["Anthropic"]
+    B -->|SSE| P2["OpenAI"]
+    B -->|SSE| P3["Groq"]
+    Q --> PG[("Postgres<br/>+ pgvector")]
+
+    PG -->|replay through the gateway| EV
+
+    subgraph EV["apps/evald · Python · CLI, not a service"]
+        direction TB
+        RUN["Replay runner<br/><i>cached, capped, resumable</i>"]
+        J["LLM judge<br/><i>position-swapped</i>"]
+        ST["Statistics<br/><i>paired bootstrap + McNemar</i>"]
+        RUN --> J --> ST
+    end
+
+    ST -->|"committed JSON"| ART[("artifacts/")]
+    ART --> DASH["apps/dashboard<br/><i>Next.js, static</i>"]
+    ART -.->|"policy.json, when fitted"| R
+    ART --> GH["apps/ghapp<br/><i>PR comment bot</i>"]
+```
+
+The loop is the product: traffic is recorded, replayed, judged, tested for significance, and the
+verdict becomes the routing policy. Every arrow into `artifacts/` is a committed file; every arrow
+out is something reading one. Nothing reads a number from anywhere else.
+
+---
+
 ## The result worth reading first
 
 A pilot across three model tiers produced this:
@@ -136,11 +179,19 @@ New here? Two guides, both hands-on:
 
 Both are free to run except one request costing $0.0002.
 
+### One command, from a clean clone
+
 ```bash
-cp .env.example .env          # add at least one provider key
-make up                       # postgres, redis, migrations, gateway, evald, dashboard
-curl -s localhost:8080/health
+make up
 ```
+
+That is the whole thing: it writes `.env` from the example if you have none, starts Postgres,
+applies migrations as a one-shot service that must exit 0, then brings up the gateway, evald and the
+dashboard — and waits until each reports healthy before returning. CI runs exactly this from a clean
+clone on every push, which is why the instruction can be trusted.
+
+Add a provider key to `.env` when you want to call a real model. Without one the stack still comes
+up and the dashboard still shows every committed measurement; only live requests need a key.
 
 The gateway is a drop-in for the OpenAI API — change `baseURL` and nothing else:
 
@@ -188,6 +239,54 @@ ROUTER_MODE=offline POLICY_PATH=artifacts/policy.json docker compose up -d gatew
 Send `model: "verdict-auto"` with an `x-verdict-route` header. Every ambiguous case — router off, no
 policy, no route hint, an unknown route — serves the strong `safe_default` instead. Cost
 optimisation happens only where there is positive evidence it is safe.
+
+---
+
+## Performance: what the gateway costs you
+
+Measured by [`make loadtest`](Makefile), committed to
+[`artifacts/loadtest.json`](artifacts/loadtest.json).
+
+|     | baseline | through gateway | added     |
+| --- | -------- | --------------- | --------- |
+| p50 | 18 ms    | 18 ms           | **+0 ms** |
+| p95 | 20 ms    | 23 ms           | **+3 ms** |
+| p99 | 20 ms    | 26 ms           | **+6 ms** |
+
+**Sustained 158,790 req/min** — 52,925 requests, **0 non-2xx, 0 errors**. 50 connections, 20s,
+Apple arm64, 10 cores, Node v26.5.0.
+
+For scale: the same gateway against **real Groq** measured **p50 795 ms, p95 1231 ms**. The gateway
+is roughly **0.1% of a real call**. That is the number worth knowing — not because 1 ms is
+impressive, but because it settles whether putting a measurement layer in the request path costs
+anything a user would notice. It does not.
+
+### Why the upstream is a mock
+
+The gateway's contribution is about a millisecond. A provider's own latency varies by hundreds of
+milliseconds between identical calls — the Groq run above spans 436 ms from p50 to p95 on one
+prompt. Measuring overhead against a real provider would measure the provider: the signal sits three
+orders of magnitude below the noise, and the result would be indistinguishable from a slow afternoon
+at Anthropic.
+
+So both arms run against the same controlled upstream — the mock the correctness tests use, real
+Anthropic SSE over a real socket — with identical load, back to back, on one machine. The difference
+is the gateway and nothing else. Trace persistence is **on**, against a real Postgres, because it is
+part of what the gateway costs.
+
+Three things this table does not claim:
+
+- **`+6 ms` is a difference of percentiles, not the 99th percentile of added latency.** The slowest
+  1% of each arm need not be the same requests. Both raw distributions are in the artifact so the
+  subtraction can be checked.
+- **The gateway arm reads 1.33× the bytes**, because OpenAI's chunk envelope is more verbose than
+  Anthropic's and translating between them is the gateway's job. That extra work lands on the arm
+  being measured, so the true cost is **at most** this, never more.
+- **One machine, no network.** A real deployment adds latency that dwarfs all of it.
+
+The first version of this test got it wrong and said so loudly: it streamed on one arm and not the
+other, and reported the gateway as **faster than not having a gateway**. The runner now exits
+non-zero on a negative p50 rather than publishing an impossibility ([D-057](DECISIONS.md)).
 
 ---
 
@@ -276,6 +375,48 @@ number.
 Negatives are hard by construction — for each item, its nearest _different_ neighbour in embedding
 space. Random negatives from a 1,500-item corpus are trivially separable, so any threshold would
 look excellent while saying nothing about production.
+
+## Limitations
+
+The things that would break this if you took it seriously, in roughly the order they would bite.
+
+**The headline comparison is underpowered.** Haiku vs Sonnet was run on 60 items, which resolves to
+±10 percentage points. That is why it returns `INCONCLUSIVE` rather than `EQUIVALENT`, and it means
+the one comparison a reader most wants — _is the cheaper model good enough?_ — is unanswered.
+Answering it needs roughly 667 paired items.
+
+**The judge has never been calibrated.** The pairwise judge and its labelling harness are built and
+tested; no human has labelled anything with them, so there is no Cohen's kappa and no evidence the
+judge agrees with a person. Every verdict in `artifacts/` therefore uses **exact-match verifiers on
+the gradable slice only**. The free-form slice — 300 items, the half that actually resembles
+production traffic — has produced no measurement at all.
+
+**No routing policy has been fitted, so no cost saving is claimed.** The router, the cascade, the
+sweep and the held-out evaluation all work and are tested end to end. None has been run on a full
+judged replay, which costs roughly $59 at current prices. Until then `safe_default` serves
+everything and Verdict saves nothing.
+
+**The corpus is academic questions, and that shapes every conclusion.** Most visibly the cache: this
+corpus is lexically near-identical within a topic while semantically distinct, which is the worst
+case for embedding similarity. A workload of distinct support tickets would very likely calibrate
+differently. The method transfers; that particular verdict does not.
+
+**Load figures are single-machine.** Client, gateway and upstream on one host, no network between
+them. They bound the gateway's own cost; they say nothing about it behind a real load balancer, and
+a free-tier Neon that sleeps when idle will dominate the first request after a quiet period.
+
+**Single-turn only, and no per-request guarantee.** Multi-turn conversations, tool calls and vision
+are out of scope. The guarantee is distributional over a route, never about any individual response
+— see the non-goals below.
+
+**Prices are pinned, not fetched.** Every price in `config/models.yaml` carries `verified_at` and a
+source URL, and the schema rejects one without them. It does not stop them going stale. A provider
+price change silently makes every historic cost figure wrong until someone re-verifies.
+
+**One person, one reviewer.** No production traffic has ever hit this. Every design decision in
+`DECISIONS.md` is argued, but none has been contradicted by an incident.
+
+---
 
 ## Deliberate non-goals
 

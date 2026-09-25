@@ -152,11 +152,31 @@ services:
       dockerfile: apps/dashboard/Dockerfile
     environment:
       NODE_ENV: production
+      # Next's standalone server binds to the container's own hostname unless
+      # told otherwise, so nothing inside the container can reach it on
+      # localhost — including its own healthcheck.
+      HOSTNAME: "0.0.0.0"
     ports:
       - "3000:3000"
     depends_on:
       gateway:
         condition: service_started
+    # Fetches a real page, not just the root. /compare is the page that reads a
+    # committed artifact, so this also catches the D-056 failure: an image built
+    # without artifacts/ serves 200s with every number missing, which looks
+    # identical to "no measurement has been run" and reports healthy.
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:3000/compare').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
 volumes:
   pgdata:

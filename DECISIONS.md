@@ -1702,3 +1702,58 @@ that are no longer true. D-006 buys trust in the environment contract, and that 
 something if every entry in it is still load-bearing.
 
 ---
+
+## D-060 — The README's own claim is enforced by a test
+
+**Status:** ACCEPTED · **Date:** 2026-09-25 · **Phase:** P8
+
+**Decision.** `tools/verify-readme.py` asserts that each headline figure in the README equals the
+artifact value that produced it. It runs in `make lint` and in CI's TypeScript job. Thirteen figures
+are covered: pilot pass rates, both verdicts, the cache calibration's sample sizes and its
+368-negative floor, and every load-test number.
+
+**Why.** The README already said _"a number that is not in a committed artifact does not exist"_ and
+_"nothing in this README was typed by hand"_. Both were assertions, and the README is precisely the
+file that is edited by hand, read by strangers, and never re-derived — the exact conditions under
+which a figure drifts from its measurement and nobody notices. A project whose entire argument is
+that claims should be checkable cannot leave its own front page unchecked.
+
+It found a real mismatch on its first run.
+
+**Alternatives rejected.** _Regex-sweep every number in the file_ — appears more thorough and is
+worse: it must be taught about version numbers, years, ports and prose, and the growing exception
+list becomes the place errors hide. _Generate the README from a template_ — removes the drift
+entirely, but the README's value is the prose around the numbers, and templating it makes that prose
+harder to write and edit than the problem justifies.
+
+**Consequence.** Adding a figure to the README means adding a row to `CHECKS`, which is deliberate
+friction: it forces the question _which artifact is this from?_ at the moment the number is written,
+rather than at the moment someone challenges it. The failure message says "fix the README — never
+the artifact", because the tempting repair to a red build is to edit the measurement.
+
+---
+
+## D-061 — `make up` is the one command, so it must do the whole job
+
+**Status:** ACCEPTED · **Date:** 2026-09-25 · **Phase:** P8
+
+**Decision.** `make up` writes `.env` from `.env.example` when absent, then runs
+`docker compose up --build -d --wait`. The dashboard gains a healthcheck that fetches `/compare`, so
+`--wait` genuinely covers every service.
+
+**What prompted it.** The README was rewritten to promise a one-command start. The promise was
+written before the target could keep it: `make up` neither created `.env` (so a clean clone failed
+on missing env) nor waited for health (so it returned while the gateway was still booting, and the
+next copy-pasted command got a connection refused).
+
+**Why the dashboard healthcheck fetches `/compare` rather than `/`.** The root page renders without
+reading any artifact. `/compare` reads a committed verdict, so the check also catches D-056: an image
+built without `artifacts/` serves 200s with every number missing, which is indistinguishable from
+"no measurement has been run yet" and reports perfectly healthy. The healthcheck is aimed at the
+failure that actually happened.
+
+**Consequence.** The rule this is a case of: when documentation and code disagree, fix the code if
+the documentation describes the better behaviour. The README's promise was right; `make up` was
+wrong. Softening the sentence would have been faster and would have left a clean clone broken.
+
+---

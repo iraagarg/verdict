@@ -47,6 +47,11 @@ jobs:
       - name: Check formatting
         run: pnpm format:check
 
+      # Every headline figure in the README must equal the artifact that
+      # produced it. The README claims this; this is what enforces it.
+      - name: README figures match artifacts/
+        run: python3 tools/verify-readme.py
+
       - name: Typecheck
         run: pnpm -r typecheck
 
