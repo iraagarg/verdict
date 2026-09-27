@@ -114,37 +114,56 @@ jobs:
         # is not a success, and that is the failure this whole phase kept
         # producing (D-062, D-064, D-065).
         run: |
-          # GATEWAY_URL is typed by a human into a web form. Accept the three
-          # shapes a person actually pastes -- with a trailing slash, or with
-          # /health already on the end -- rather than turning either into a
-          # ten-minute timeout. D-067.
-          URL="${RAW_URL%/}"
-          URL="${URL%/health}"
-          URL="${URL%/}"
+          # GATEWAY_URL is typed by a human into a web form, so it is input and
+          # gets normalised at the boundary like any other (D-067).
+          #
+          # Strip ALL whitespace first, not just a trailing slash: a variable
+          # pasted into a web form arrives carrying a trailing newline, which
+          # produced the URL "https://host\n/health" and a connection failure
+          # that read as a wrong endpoint. Then drop a trailing slash and a
+          # trailing /health, which are the other two shapes people paste.
+          URL=$(printf '%s' "$RAW_URL" | tr -d '[:space:]')
+          URL="${URL%/}"; URL="${URL%/health}"; URL="${URL%/}"
+
+          if [ -z "$URL" ]; then
+            echo "::error::GATEWAY_URL is set but empty after trimming whitespace." >&2
+            exit 1
+          fi
           echo "polling ${URL}/health"
 
           for i in $(seq 1 40); do
-            code=$(curl -s -o /tmp/body -w '%{http_code}' --max-time 10 "$URL/health" || echo "000")
+            : > /tmp/body
+            # `|| code=000` rather than `|| echo 000`: inside a command
+            # substitution the echo is APPENDED to what curl already printed,
+            # which turned 000 into 000000 and matched no case at all.
+            code=$(curl -s -o /tmp/body -w '%{http_code}' --max-time 10 "$URL/health") || code="000"
+
             case "$code" in
               200)
                 echo "healthy after ${i} attempt(s)"
                 cat /tmp/body; echo
                 exit 0
                 ;;
-              000|502|503|504)
-                # Not up YET: connection refused, or the platform's own
-                # "still starting" page. Worth waiting for.
+              000)
+                # No HTTP response: DNS failure, connection refused, timeout, or
+                # a malformed URL. Early on this is a service still starting, so
+                # keep waiting -- but say so, because a URL that is simply wrong
+                # looks identical and would otherwise be silent for ten minutes.
+                echo "  attempt ${i}: no response from ${URL}/health (not up yet, or the URL is wrong)"
+                ;;
+              502|503|504)
+                echo "  attempt ${i}: HTTP ${code} — platform says still starting"
                 ;;
               *)
-                # Any other HTTP response means something IS listening and it
-                # does not serve /health -- the URL is wrong, and no amount of
-                # waiting fixes a wrong URL. Fail now, and say so.
-                echo "::error::$URL/health returned HTTP $code. The service is reachable but that is not the health endpoint -- check the GATEWAY_URL repository variable." >&2
-                head -c 300 /tmp/body >&2; echo >&2
+                # A definite HTTP answer that is not 200 means something IS
+                # listening and does not serve /health. Waiting cannot fix a
+                # wrong path, so fail now.
+                echo "::error::${URL}/health returned HTTP ${code}. Something is listening there but it is not the gateway's health endpoint — check the GATEWAY_URL repository variable." >&2
+                head -c 300 /tmp/body >&2 || true; echo >&2
                 exit 1
                 ;;
             esac
             sleep 15
           done
-          echo "::error::gateway never became healthy at $URL/health after 10 minutes" >&2
+          echo "::error::${URL}/health never answered 200 in 10 minutes. If every attempt above said 'no response', the URL is probably wrong rather than the service being down." >&2
           exit 1
