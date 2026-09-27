@@ -1943,3 +1943,51 @@ deploy workflow polls `/health` after Railway claims success instead of believin
 `GATEWAY_URL` check).
 
 ---
+
+## D-066 — One way to deploy, not two
+
+**Status:** ACCEPTED · **Date:** 2026-09-27 · **Phase:** P8 · **Supersedes part of D-057's pipeline**
+
+**What happened.** With all five secrets configured, the Deploy workflow reached this:
+
+```
+✓ Test                           ✓ Which targets are configured?
+✓ Migrate Neon                   ✗ Deploy gateway (Railway)
+                                 ✗ Deploy dashboard (Vercel)
+```
+
+Tests passed, the secrets resolved, and migrations applied to the real Neon database from CI. Both
+CLI deploy steps failed.
+
+**The diagnosis that mattered was not the error.** Railway was connected with _Deploy from GitHub
+repo_, and Vercel was imported from GitHub. **Both platforms already deploy on every push.** The
+workflow was deploying a third time over the top of them, through CLIs, needing four extra tokens,
+and racing the deploys the platforms had already started.
+
+**Decision.** The deploy jobs are deleted. The workflow does the two things the platforms do not —
+run the full suite, and apply migrations — then polls `GATEWAY_URL/health` until the live gateway
+answers. `DATABASE_URL` is the only secret it needs; the four platform tokens are gone.
+
+**Why deleted rather than fixed.** The immediate cause was almost certainly token scope — Railway
+distinguishes project tokens from account tokens, and the deployment guide said to create an
+account one. That is a half-hour fix. It would have left the repository with **two independent ways
+to deploy the same service**, and two mechanisms that deploy the same thing will eventually
+disagree about which one shipped what. The failure was a symptom of a design that should not have
+existed.
+
+**What this gives up, stated plainly.** D-057's pipeline guaranteed migrations completed before new
+code served traffic. That guarantee is gone: the platforms deploy on push, and this workflow runs
+alongside them. **They race.**
+
+That is acceptable _here, and only here_, because every migration in `db/migrations/` is additive
+and idempotent — new tables, new columns, nothing dropped or renamed — so new code against the old
+schema, and old code against the new one, both work. The moment a migration becomes destructive the
+argument fails, and the correct response is to switch the platform integrations off and deploy
+through the CLIs after all, not to hope the race resolves favourably. `DEPLOY.md` says so at the
+point where someone would need to know.
+
+**Alternatives rejected.** _Fix the token scope and keep both paths_ — see above. _Leave it red_ —
+the deployments work, so the failure is cosmetic; a red badge on the front page of a portfolio repo
+is not cosmetic.
+
+---

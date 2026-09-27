@@ -114,13 +114,13 @@ Add these under **Settings → Secrets and variables → Actions** on GitHub.
 
 ### Secrets
 
-| Secret              | Where to get it                                           |
-| ------------------- | --------------------------------------------------------- |
-| `DATABASE_URL`      | Neon pooled string — used to run migrations before deploy |
-| `RAILWAY_TOKEN`     | Railway → Account Settings → Tokens                       |
-| `VERCEL_TOKEN`      | Vercel → Settings → Tokens                                |
-| `VERCEL_ORG_ID`     | `.vercel/project.json` after running `vercel link`        |
-| `VERCEL_PROJECT_ID` | same file                                                 |
+| Secret         | Where to get it                                          |
+| -------------- | -------------------------------------------------------- |
+| `DATABASE_URL` | Neon pooled string — the only secret this workflow needs |
+
+Railway and Vercel each deploy through their own GitHub integration, so neither needs a token here.
+An earlier version deployed through their CLIs as well; that duplicated what the integrations were
+already doing and failed on token scope (**D-066**).
 
 ### Variables (not secrets)
 
@@ -136,14 +136,19 @@ A deploy that reports success while the service 503s is not a success.
 
 ```
 push to main
-  └─ test        every suite, exactly what `make check` runs locally
-      └─ migrate  ./tools/migrate.sh against Neon
-          └─ deploy gateway   → Railway, then poll /health until it answers
-          └─ deploy dashboard → Vercel
+  ├─ Railway and Vercel deploy on their own (their GitHub integrations)
+  └─ this workflow:
+       test      every suite, exactly what `make check` runs locally
+        └─ migrate  ./tools/migrate.sh against Neon
+            └─ verify   poll GATEWAY_URL/health until the live gateway answers
 ```
 
-**Migrations run before the deploy, never after.** The alternative leaves a window where new code is
-serving traffic against an old schema.
+**The migration and the platform deploys race**, because the platforms deploy on push and this
+workflow runs alongside them. That is acceptable _here_ and only here: every migration in
+`db/migrations/` is additive and idempotent — new tables and new columns, nothing dropped or
+renamed — so new code against the old schema, and old code against the new one, both work. The
+moment a migration becomes destructive that stops being true, and deploying through the CLIs with
+the platform integrations switched off becomes the right answer instead (**D-066**).
 
 It is the same `tools/migrate.sh` that docker compose and CI use. One migration path across three
 environments, so a migration that works locally cannot fail in production for a reason nobody has
