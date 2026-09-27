@@ -2031,3 +2031,52 @@ does not feel like input. It is.
 window is unchanged for genuine slow starts; only the _wrong URL_ case now fails fast.
 
 ---
+
+## D-068 — Amends D-067: the first fix was incomplete, and its own error message lied
+
+**Status:** ACCEPTED · **Date:** 2026-09-28 · **Phase:** P8 (defect in a defect fix)
+
+**What happened.** The run after D-067 failed in 3m19s with:
+
+```
+polling https://verdictgateway-production.up.railway.app
+/health
+Error: https://...app
+/health returned HTTP 000000. The service is reachable but that is not the health endpoint
+```
+
+The gateway had been up and answering for eight hours.
+
+**Two faults, both mine, and the second hid the first.**
+
+1. **The variable carried a trailing newline.** `${RAW_URL%/}` strips a slash, not whitespace, so the
+   URL became `https://host\n/health`. The log shows it split across two lines — the evidence was
+   printed, and only because the message echoes the URL it actually built.
+2. **`code=$(curl … -w '%{http_code}' … || echo "000")` appends.** Inside a command substitution the
+   `echo` lands _after_ whatever curl already printed, so a connection failure produced `000000`.
+   That matched neither `000` nor any other case and fell through to the "something is listening"
+   branch — asserting a **reachable service with a wrong path** when nothing had been reached at all.
+
+**Decision.** Strip all whitespace before anything else; `|| code="000"` outside the substitution.
+The `000` branch now logs on every attempt that it may equally mean a wrong URL, because "no
+response" and "wrong address" are genuinely indistinguishable from a single request.
+
+**Two lessons, both narrower and more useful than "validate input".**
+
+_D-067 normalised the shapes people paste and not the transport they paste through._ `/` and
+`/health` are things a person types deliberately; a trailing newline is added by the web form,
+typed by nobody, and invisible in the field. Handling the visible variants while the invisible one
+does the damage is the characteristic failure of input-cleaning that starts from what you imagine
+someone typing.
+
+_An error message must report what was observed, not a cause it has not established._ "The service
+is reachable but that is not the health endpoint" was a diagnosis, stated confidently, and false —
+and it sent the investigation at the URL's path when the problem was a newline in the host. A
+message that had said "no HTTP response" would have pointed straight at it. Where an observation is
+genuinely ambiguous, the message now says so.
+
+**Consequence.** Verified against the live gateway across six pastings — bare, trailing slash,
+trailing `/health`, trailing newline, surrounding spaces, slash-plus-newline — all resolving to
+HTTP 200, and an unreachable host now yielding exactly `000`.
+
+---
