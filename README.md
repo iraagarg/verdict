@@ -10,6 +10,19 @@ a statistical quality floor.
 > Existing tools (LangSmith, Braintrust, Promptfoo) measure LLM quality but do not close the loop to
 > automatic cost-optimal routing with a proven quality guarantee. Verdict does.
 
+**Live:** [dashboard](https://verdict-navy.vercel.app) ·
+[gateway health](https://verdictgateway-production.up.railway.app/health)
+
+```bash
+curl -N https://verdictgateway-production.up.railway.app/v1/chat/completions \
+  -H 'content-type: application/json' \
+  -d '{"model":"openai/gpt-oss-20b","stream":true,
+       "messages":[{"role":"user","content":"Say hello"}]}'
+```
+
+That is the real gateway, on the internet, in front of a real provider. The dashboard shows only
+measurements that exist — two pages are deliberately empty, and say which command would fill them.
+
 ---
 
 ## Architecture
