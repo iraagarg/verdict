@@ -1,38 +1,42 @@
 # What to do next
 
-Your personal checklist. Everything left, in order, with every command written out.
+Your personal checklist.
 
-Work top to bottom. **Each task works on its own** — you can stop after any one of them and
-nothing is broken.
+**Tasks 1–5 are done. Your project is live on the internet.** Only the demo video is left.
 
 ---
 
 # Where you are right now
 
-**The project is finished.** All 8 phases built.
+|                    |                                                      |
+| ------------------ | ---------------------------------------------------- |
+| Dashboard          | **https://verdict-navy.vercel.app**                  |
+| Gateway            | **https://verdictgateway-production.up.railway.app** |
+| Database           | Neon, migrated automatically from GitHub             |
+| Commits            | 41                                                   |
+| Tests passing      | 669                                                  |
+| Decisions recorded | 68                                                   |
+| CI                 | green                                                |
+| Deploy pipeline    | green                                                |
+| Money spent        | $0.49                                                |
 
-|                        |       |
-| ---------------------- | ----- |
-| Commits                | 28    |
-| Tests passing          | 669   |
-| Decisions written down | 61    |
-| CI on GitHub           | green |
-| Money spent so far     | $0.49 |
-
-What is left is **not building**. It is: understanding it, putting it online, and recording a video.
+Every push now runs your full test suite, applies database migrations, and confirms your live
+gateway is answering. **If the tests fail, nothing ships.**
 
 ---
 
-# The six tasks
+# The tasks
 
-| #   | Task                      | Time   | Cost | Needed?             |
-| --- | ------------------------- | ------ | ---- | ------------------- |
-| 1   | See your own project run  | 20 min | free | **do this first**   |
-| 2   | Database online (Neon)    | 10 min | free | for deploying       |
-| 3   | Gateway online (Railway)  | 15 min | free | for deploying       |
-| 4   | Dashboard online (Vercel) | 10 min | free | for deploying       |
-| 5   | Automatic deploys         | 10 min | free | optional but nice   |
-| 6   | Demo video                | 1 hour | free | good for interviews |
+| #   | Task                      | Status                  |
+| --- | ------------------------- | ----------------------- |
+| 1   | See your own project run  | ✅ done                 |
+| 2   | Database online (Neon)    | ✅ done                 |
+| 3   | Gateway online (Railway)  | ✅ done                 |
+| 4   | Dashboard online (Vercel) | ✅ done                 |
+| 5   | Automatic deploys         | ✅ done                 |
+| 6   | **Demo video**            | ← **the only one left** |
+
+Tasks 1–5 below are kept as a record of what was done and why. **Skip to Task 6.**
 
 ---
 
@@ -478,38 +482,37 @@ window where new code runs against an old database — and things break in confu
 
 ---
 
-# Task 6 — Record the demo video
+# Task 6 — Record the demo video ← YOU ARE HERE
 
 ```bash
+cd ~/Projects/flagship_project1
 open DEMO.md
 ```
 
-Ninety seconds, nine beats. Each beat says what to show, what to say, and how long.
+Nine beats, ninety seconds. Each beat says what to put on screen, what to say, and how long.
 
-## Before recording
+**Film the live URLs, not localhost.** That is the advantage of having deployed: a viewer can see
+it is genuinely on the internet, not a demo running on your laptop.
 
-```bash
-make up
-```
+## Before you record
 
-Then:
+- Terminal font at **16–18pt**. Smaller is unreadable once the video is compressed.
+- Browser at 1280×720, zoom 110%, **hide the bookmarks bar**, hide extension icons.
+- Two tabs ready: your dashboard `/compare` and `/pareto`.
+- Dark mode in both, so cuts do not flash white.
+- **Pre-type every command** and press Enter on the beat. Do not type live.
 
-- Terminal font at **16–18pt** (smaller is unreadable once compressed)
-- Browser at 1280×720, zoom 110%, **hide your bookmarks bar**
-- Two tabs open: `/compare` and `/pareto`
-- **Pre-type every command** and press Enter on the beat — do not type live
+## The beat that matters
 
-## The one beat that matters
+**Beat 5. Eighteen seconds.** You show two models scoring identically, say that every instinct says
+switch and halve the bill — then show your system saying **INCONCLUSIVE**.
 
-**Beat 5, 18 seconds.** You show two models scoring identically, say every instinct says switch and
-save half the money — then show your system saying **INCONCLUSIVE**.
-
-Read that beat twice before you record. Do not rush it. Everything else is context.
+Read that beat twice before recording. Do not rush it. Everything else is context for it.
 
 ## If you only get one take
 
-Beats **4, 5 and 6** alone make a 40-second video that still works: it fails expensive, it refuses
-to conclude, it commits when the evidence is there. That is the whole argument.
+Beats **4 → 5 → 6** alone make a forty-second video that still works: it fails expensive, it refuses
+to conclude, and it commits when the evidence is there. That is the entire argument.
 
 ---
 
