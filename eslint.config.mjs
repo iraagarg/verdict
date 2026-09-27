@@ -41,4 +41,20 @@ export default tseslint.config(
     files: ["**/*.test.ts", "**/*.test.tsx"],
     rules: { "no-console": "off" },
   },
+  {
+    /**
+     * Build-configuration files run in Node, so Node globals exist.
+     *
+     * TypeScript sources never hit this: typescript-eslint disables `no-undef`
+     * for them, because the compiler already checks it against @types/node. A
+     * plain `.mjs` gets `js.configs.recommended` instead, where `no-undef` is on
+     * and nothing has told it what `process` is — so reading an environment
+     * variable in `next.config.mjs` fails lint while the identical line in a
+     * `.ts` file passes.
+     */
+    files: ["**/*.config.mjs", "**/*.config.js"],
+    languageOptions: {
+      globals: { process: "readonly", __dirname: "readonly", console: "readonly" },
+    },
+  },
 );

@@ -24,3 +24,5 @@ __pycache__/
 
 # Human labels are real measurement data and ARE committed (calibration/labels.jsonl).
 # Nothing to ignore here; this note exists so nobody adds it later by reflex.
+.vercel
+.env*
