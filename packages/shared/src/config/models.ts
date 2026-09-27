@@ -16,6 +16,7 @@
  *      adapter layer knows the difference. See DESIGN.md §6.4 and DECISIONS.md D-010.
  */
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 
@@ -185,7 +186,22 @@ export function loadModelConfig(path: string): ModelConfig {
   try {
     text = readFileSync(path, "utf8");
   } catch (err) {
-    throw new ModelConfigError(`cannot read models.yaml at ${path}: ${(err as Error).message}`);
+    // Report the ABSOLUTE path tried and the directory it was resolved against,
+    // not just the configured string.
+    //
+    // A relative MODELS_CONFIG_PATH means something different depending on where
+    // the process was launched from. On Railway, a start command of
+    // `pnpm --filter @verdict/gateway start` runs the app with its cwd set to
+    // apps/gateway, so the default "config/models.yaml" silently became
+    // apps/gateway/config/models.yaml. The old message echoed the relative path
+    // back and left the reader no way to see that — the one fact needed to
+    // diagnose it was the fact being omitted (D-063).
+    throw new ModelConfigError(
+      `cannot read models.yaml at ${path}: ${(err as Error).message}\n` +
+        `  resolved to : ${resolve(path)}\n` +
+        `  cwd         : ${process.cwd()}\n` +
+        `  Set MODELS_CONFIG_PATH to an absolute path, or start the process from the repo root.`,
+    );
   }
   return parseModelConfig(text);
 }

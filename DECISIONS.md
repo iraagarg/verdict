@@ -1811,3 +1811,49 @@ Verified by building the image and running it twice — once plain, once with `P
 platform's port.
 
 ---
+
+## D-063 — A "file not found" must say where it looked
+
+**Status:** ACCEPTED · **Date:** 2026-09-27 · **Phase:** P8 (defect, found on a real deploy)
+
+**What happened.** Railway crash-looped with:
+
+```
+ModelConfigError: cannot read models.yaml at config/models.yaml:
+  ENOENT: no such file or directory, open 'config/models.yaml'
+```
+
+The file was present in the image. The service's start command was
+`pnpm --filter @verdict/gateway start`, which runs the app with its working directory set to
+`apps/gateway` — so the relative default `config/models.yaml` resolved to
+`apps/gateway/config/models.yaml`, which does not exist.
+
+**The message made that invisible.** It echoed back the relative path it had been given, which was
+exactly the string in the configuration and therefore looked correct. The single fact needed to
+diagnose it — what that relative path resolved to, and against which directory — was the fact being
+withheld.
+
+**Decision.** `loadModelConfig` reports the absolute resolved path, the process's cwd, and the fix:
+
+```
+cannot read models.yaml at config/models.yaml: ENOENT: ...
+  resolved to : /app/apps/gateway/config/models.yaml
+  cwd         : /app/apps/gateway
+  Set MODELS_CONFIG_PATH to an absolute path, or start the process from the repo root.
+```
+
+**Alternatives rejected.** _Search a list of candidate locations_ — makes the common case work and
+the failure case worse: the process would start against whichever config it happened to find, which
+is precisely the class of silent-wrong-config bug D-006 exists to prevent. _Resolve relative to the
+compiled module instead of cwd_ — more robust, but it hides the platform misconfiguration rather
+than reporting it, and the misconfiguration (wrong start command) was itself the real bug.
+
+**Consequence, and the general rule.** An error about a path must state the path that was actually
+opened, not the path that was configured — those differ exactly when something is wrong, which is
+the only time anyone reads the message. The same applies to any error quoting user input: echoing
+the input back confirms what the reader already believes.
+
+The deployment docs now set `MODELS_CONFIG_PATH` explicitly and specify the builder, so the
+condition cannot recur; the message is there for the next platform nobody has tried yet.
+
+---
