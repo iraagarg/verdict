@@ -17,6 +17,10 @@ COPY apps/dashboard apps/dashboard
 # — a silent failure the container cannot report.
 COPY artifacts artifacts
 ENV NEXT_TELEMETRY_DISABLED=1
+# Selects `output: "standalone"` in next.config.mjs. ONLY this build sets it:
+# Vercel needs the ordinary .next layout and silently publishes an empty site
+# when given a standalone build (D-065).
+ENV DOCKER_BUILD=1
 RUN pnpm --filter @verdict/dashboard build
 
 FROM node:22-alpine AS runtime

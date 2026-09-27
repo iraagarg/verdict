@@ -1863,15 +1863,15 @@ condition cannot recur; the message is there for the next platform nobody has tr
 **Status:** ACCEPTED · **Date:** 2026-09-27 · **Phase:** P8 · **Implements the follow-up D-056 asked for**
 
 **The bind that prompted it.** Vercel resolves `next` from the Root Directory's `package.json`.
-The repo root has no `next` dependency, so a root-level Root Directory fails with *"No Next.js
-version detected"*. But `artifacts/` lives above `apps/dashboard`, so pointing the Root Directory at
+The repo root has no `next` dependency, so a root-level Root Directory fails with _"No Next.js
+version detected"_. But `artifacts/` lives above `apps/dashboard`, so pointing the Root Directory at
 the app hides the data. The two requirements pull in opposite directions:
 
-| Root Directory | Vercel finds Next? | Build sees artifacts/? |
-| --- | --- | --- |
-| repo root | no — build fails | yes |
-| `apps/dashboard` | yes | **only with "Include files outside the Root Directory"** |
-| `apps/dashboard` + that toggle | yes | yes |
+| Root Directory                 | Vercel finds Next? | Build sees artifacts/?                                   |
+| ------------------------------ | ------------------ | -------------------------------------------------------- |
+| repo root                      | no — build fails   | yes                                                      |
+| `apps/dashboard`               | yes                | **only with "Include files outside the Root Directory"** |
+| `apps/dashboard` + that toggle | yes                | yes                                                      |
 
 **Decision.** Root Directory is `apps/dashboard` with that toggle on, and the root `vercel.json` is
 deleted — with the Root Directory set to the app, Vercel reads config from there, so a root-level
@@ -1888,9 +1888,9 @@ The distinction it draws:
   state that says which command would produce the data.
 - **missing directory** → packaging fault. Fails the build.
 
-**Why this is the right place to draw it.** D-056 ended with: *"where absence is a legitimate state,
+**Why this is the right place to draw it.** D-056 ended with: _"where absence is a legitimate state,
 absence cannot also serve as the error signal — a build-time assertion that at least one artifact
-resolved would have caught this immediately, and P8 should add one."* This is that assertion. The
+resolved would have caught this immediately, and P8 should add one."_ This is that assertion. The
 per-file check cannot distinguish the two cases, because both produce a missing file; the directory
 can, because a build that cannot see the directory at all was misconfigured, never under-measured.
 
@@ -1903,6 +1903,43 @@ and that step is somewhere a number could change without the artifact changing.
 
 **Consequence.** Verified both ways before shipping: a normal build still succeeds, and moving
 `artifacts/` aside fails the build with the path it tried. This is the third deployment defect in
-P8 (with D-062 and D-063) whose common shape is *the failure looked like success*.
+P8 (with D-062 and D-063) whose common shape is _the failure looked like success_.
+
+---
+
+## D-065 — `output: "standalone"` is for Docker only
+
+**Status:** ACCEPTED · **Date:** 2026-09-27 · **Phase:** P8 (defect, found on a real deploy)
+
+**What happened.** Vercel reported `Ready`. Every path returned `x-vercel-error: NOT_FOUND` —
+`/`, `/compare`, even `/_next/static`. Nothing was deployed, and the deployment said it had
+succeeded.
+
+**Cause.** `next.config.mjs` set `output: "standalone"` unconditionally. Standalone emits a
+self-contained server bundle into `.next/standalone`, which exists so the Docker image can run
+without `node_modules` — `apps/dashboard/Dockerfile` copies exactly that directory. Vercel builds
+from the ordinary `.next` layout and converts it into its own output format; handed a standalone
+build it finds nothing it recognises, and publishes an empty deployment.
+
+**Decision.** `output` is set only when `DOCKER_BUILD=1`, and only `apps/dashboard/Dockerfile` sets
+it. An explicit named switch rather than sniffing an ambient platform variable (`VERCEL`,
+`CI`, …): those are inherited in places nobody predicted, and the failure mode here is silent.
+
+**Alternatives rejected.** _Detect Vercel via `process.env.VERCEL`_ — inverts the default, so every
+platform that is not Vercel gets standalone, including CI and any future host; the same silent
+breakage moves rather than goes away. _Drop standalone entirely and run `next start` in Docker_ —
+works, and adds the whole `node_modules` tree to the image for no benefit.
+
+**Consequence, and the pattern.** Verified in both directions before shipping: a plain build emits
+no `standalone/` and produces the per-route HTML Vercel needs; `DOCKER_BUILD=1` emits `standalone/`;
+and the rebuilt container still reports healthy and still renders `INCONCLUSIVE` on `/compare`.
+
+This is the **third** P8 defect with one shape: **a deployment that reports success while serving
+nothing.** D-062 (green build, crash-looping container), D-064 (successful build, blank site),
+D-065 (successful deploy, empty deployment). Every one passed CI, passed `docker compose up`, and
+passed locally. Their common cause is that "the build exited 0" was being treated as "the thing
+works" — which is why D-064's guard asserts on content rather than on exit status, and why the
+deploy workflow polls `/health` after Railway claims success instead of believing it (D-057's
+`GATEWAY_URL` check).
 
 ---
