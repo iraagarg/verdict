@@ -108,19 +108,43 @@ jobs:
     steps:
       - name: Poll /health
         env:
-          URL: ${{ vars.GATEWAY_URL }}
+          RAW_URL: ${{ vars.GATEWAY_URL }}
         # Railway deploys on its own schedule, so this waits rather than
         # checking once: a deploy that reports success while the service 503s
         # is not a success, and that is the failure this whole phase kept
         # producing (D-062, D-064, D-065).
         run: |
+          # GATEWAY_URL is typed by a human into a web form. Accept the three
+          # shapes a person actually pastes -- with a trailing slash, or with
+          # /health already on the end -- rather than turning either into a
+          # ten-minute timeout. D-067.
+          URL="${RAW_URL%/}"
+          URL="${URL%/health}"
+          URL="${URL%/}"
+          echo "polling ${URL}/health"
+
           for i in $(seq 1 40); do
-            if curl -fsS --max-time 10 "$URL/health" >/dev/null 2>&1; then
-              echo "healthy after ${i} attempt(s)"
-              curl -fsS "$URL/health"
-              exit 0
-            fi
+            code=$(curl -s -o /tmp/body -w '%{http_code}' --max-time 10 "$URL/health" || echo "000")
+            case "$code" in
+              200)
+                echo "healthy after ${i} attempt(s)"
+                cat /tmp/body; echo
+                exit 0
+                ;;
+              000|502|503|504)
+                # Not up YET: connection refused, or the platform's own
+                # "still starting" page. Worth waiting for.
+                ;;
+              *)
+                # Any other HTTP response means something IS listening and it
+                # does not serve /health -- the URL is wrong, and no amount of
+                # waiting fixes a wrong URL. Fail now, and say so.
+                echo "::error::$URL/health returned HTTP $code. The service is reachable but that is not the health endpoint -- check the GATEWAY_URL repository variable." >&2
+                head -c 300 /tmp/body >&2; echo >&2
+                exit 1
+                ;;
+            esac
             sleep 15
           done
-          echo "gateway never became healthy at $URL/health" >&2
+          echo "::error::gateway never became healthy at $URL/health after 10 minutes" >&2
           exit 1

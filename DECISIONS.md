@@ -1991,3 +1991,43 @@ the deployments work, so the failure is cosmetic; a red badge on the front page 
 is not cosmetic.
 
 ---
+
+## D-067 — A hand-typed URL is untrusted input
+
+**Status:** ACCEPTED · **Date:** 2026-09-27 · **Phase:** P8 (defect)
+
+**What happened.** With the simplified pipeline, Deploy reached: tests green, migrations applied —
+and then spent **13 minutes 45 seconds** failing. The `verify` job polled `$GATEWAY_URL/health`
+forty times over ten minutes and gave up, while the gateway had been up and answering for hours.
+
+`GATEWAY_URL` is typed by a person into a web form. Given a trailing slash the job polled
+`…app//health`; given a value that already ended in `/health` it polled `…app/health/health`. Both
+return 404. Verified against the live service:
+
+| pasted value          | polled               | result  |
+| --------------------- | -------------------- | ------- |
+| `…railway.app`        | `…app/health`        | **200** |
+| `…railway.app/`       | `…app//health`       | 404     |
+| `…railway.app/health` | `…app/health/health` | 404     |
+
+**Decision.** The job strips a trailing slash and a trailing `/health` before building the URL, so
+all four shapes a person plausibly pastes resolve to the same endpoint. And it stops treating every
+failure as "not ready yet": `000`, `502`, `503`, `504` mean _still starting_ and are worth waiting
+for, while any other HTTP response means **something is listening and it is not the health
+endpoint** — a wrong URL, which no amount of waiting fixes. That now fails on the first attempt
+with the status code and the variable to check, instead of ten minutes of silence.
+
+**Why fix the workflow rather than the variable.** Correcting the value would have taken ten
+seconds and left the trap for the next person, on the next platform, with the same ten-minute
+punishment. The documentation already said "no trailing slash"; a rule that has to be remembered is
+a rule that will be forgotten, and this one cost a quarter of an hour to diagnose.
+
+**The general shape.** A configuration value entered by hand is input, and input gets normalised and
+validated at the boundary — the same rule this project applies to every provider response and every
+environment variable. It had simply not been applied to CI configuration, because CI configuration
+does not feel like input. It is.
+
+**Consequence.** Verified against the live gateway for all four pastings before pushing. The polling
+window is unchanged for genuine slow starts; only the _wrong URL_ case now fails fast.
+
+---
