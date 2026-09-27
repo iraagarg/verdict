@@ -14,17 +14,58 @@
  * loader returns null and each page renders a real empty state explaining what
  * would produce the data.
  */
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { join, resolve } from "node:path";
 
 const ARTIFACTS_DIR = join(process.cwd(), "..", "..", "artifacts");
+
+/**
+ * Refuse to build a dashboard that has no artifacts to show.
+ *
+ * A MISSING FILE is a normal state — most measurements cost money and have not
+ * been run, and each page renders a real empty state saying so. A MISSING
+ * DIRECTORY is not: it means the build cannot see `artifacts/` at all, which is
+ * a packaging fault.
+ *
+ * Those two produce an identical site. That is exactly how D-056 hid for a whole
+ * phase: the Dockerfile never copied `artifacts/` into the build stage, every
+ * loader returned null, every page rendered its empty state, the build succeeded
+ * and the container reported healthy. The same trap is waiting on Vercel, where
+ * pointing the Root Directory at `apps/dashboard` without including files from
+ * outside it produces a perfect, entirely blank site.
+ *
+ * D-056 said a build-time assertion would have caught it immediately. This is it.
+ * Where absence is a legitimate state, absence cannot also be the error signal —
+ * so the distinction has to be drawn somewhere it can still be drawn, and the
+ * only place left is the directory itself.
+ */
+function assertArtifactsReachable(): void {
+  const dir = resolve(ARTIFACTS_DIR);
+  const hint =
+    `\n  looked in : ${dir}` +
+    `\n  cwd       : ${process.cwd()}` +
+    `\n\n  The dashboard reads artifacts/ at BUILD time and bakes the values in (D-052).` +
+    `\n  On Vercel: set Root Directory to apps/dashboard AND enable` +
+    `\n  "Include files outside the Root Directory in the Build Step".` +
+    `\n  In Docker: the build stage must COPY artifacts (D-056).\n`;
+
+  if (!existsSync(dir)) {
+    throw new Error(`artifacts/ is not reachable from the build.${hint}`);
+  }
+  if (readdirSync(dir).filter((f) => f.endsWith(".json")).length === 0) {
+    throw new Error(`artifacts/ is reachable but contains no JSON.${hint}`);
+  }
+}
+
+assertArtifactsReachable();
 
 function read<T>(name: string): T | null {
   try {
     return JSON.parse(readFileSync(join(ARTIFACTS_DIR, name), "utf8")) as T;
   } catch {
     // Absent or unreadable. Both mean "this measurement has not been made",
-    // which the page renders as an empty state rather than a failure.
+    // which the page renders as an empty state rather than a failure. The
+    // directory itself is checked above — that one is a build failure.
     return null;
   }
 }

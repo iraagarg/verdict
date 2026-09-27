@@ -87,12 +87,24 @@ and deploys nothing. Main stays green. Add secrets one at a time and each target
 ## 3. Vercel — the dashboard
 
 1. Sign up at [vercel.com](https://vercel.com), **Add New → Project**, import `iraagarg/verdict`.
-2. Vercel reads [`vercel.json`](vercel.json). Leave the root directory as the repo root — **not**
-   `apps/dashboard`. The dashboard reads `artifacts/` at build time and bakes the numbers into the
-   static output (**D-052**), so it needs the whole repo present. Pointing Vercel at the app
-   directory alone reproduces **D-056**: the site builds fine and every page renders empty.
-3. Deploy. No environment variables — the dashboard has no runtime dependencies, no database and no
+2. **Root Directory: `apps/dashboard`.** Vercel resolves `next` from the Root Directory's
+   `package.json`; the repo root has no `next` dependency, so leaving it at the root fails with
+   _"No Next.js version detected"_.
+3. **Turn ON "Include files outside the Root Directory in the Build Step."** This is not optional.
+   The dashboard reads `artifacts/` at build time and bakes the numbers into the static output
+   (**D-052**), and `artifacts/` lives above `apps/dashboard`. Without this the build produces a
+   perfect, entirely blank site — the **D-056** failure exactly.
+4. Deploy. No environment variables — the dashboard has no runtime dependencies, no database and no
    secrets. That is the whole point of reading committed artifacts.
+
+> Those two settings pull in opposite directions, which is why this is worth stating twice: the
+> Root Directory has to be the app so Vercel can find Next.js, and files from outside it have to
+> come along so the app can find its data. Get one without the other and the build still succeeds.
+>
+> It cannot fail silently any more. `lib/artifacts.ts` asserts at build time that `artifacts/` is
+> reachable and contains JSON, and fails the build naming both paths it tried if not (**D-064**).
+> A missing _file_ is still a normal state and renders an empty page; a missing _directory_ is a
+> packaging fault and now stops the build.
 
 ---
 
