@@ -78,9 +78,9 @@ and deploys nothing. Main stays green. Add secrets one at a time and each target
    curl -s https://<your-app>.up.railway.app/health
    ```
 
-> **`GATEWAY_PORT` is not in that table on purpose.** Railway injects `PORT`. If the gateway does
-> not pick that up, set `GATEWAY_PORT=${{PORT}}` in Railway's variable editor, which expands
-> Railway's own value.
+> **`GATEWAY_PORT` is not in that table on purpose.** Railway assigns a port and announces it as
+> `PORT`; the gateway reads that automatically (**D-062**). Set `GATEWAY_PORT` only if you want to
+> override it — it wins when both are present.
 
 ---
 

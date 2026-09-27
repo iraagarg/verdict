@@ -203,11 +203,33 @@ const SECRET_KEYS = new Set([
 ]);
 
 /**
+ * Accept the platform's `PORT` when `GATEWAY_PORT` is not set.
+ *
+ * Railway, Render, Fly, Heroku and Cloud Run all assign a port at start and
+ * announce it as `PORT`; a service that ignores it binds the wrong port and the
+ * platform's health check never succeeds. `GATEWAY_PORT` still wins when both
+ * are present, so local config and compose are unaffected and an operator can
+ * always override.
+ *
+ * Deliberately here rather than in the schema: Zod's `preprocess` sees only its
+ * own field, and a fallback between two variables is a property of the pair.
+ */
+function normalisePlatformPort(raw: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const explicit = raw["GATEWAY_PORT"];
+  if (explicit !== undefined && explicit.trim() !== "") return raw;
+
+  const platform = raw["PORT"];
+  if (platform === undefined || platform.trim() === "") return raw;
+
+  return { ...raw, GATEWAY_PORT: platform };
+}
+
+/**
  * Validate a raw environment. Throws `EnvValidationError` listing every problem.
  * Secret values are never included in the message — only the variable name.
  */
 export function loadEnv(raw: NodeJS.ProcessEnv = process.env): Env {
-  const result = EnvSchema.safeParse(raw);
+  const result = EnvSchema.safeParse(normalisePlatformPort(raw));
   if (result.success) return result.data;
 
   const issues = result.error.issues.map((issue) => {

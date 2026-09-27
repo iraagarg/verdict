@@ -16,18 +16,33 @@ COPY packages/shared packages/shared
 COPY apps/gateway apps/gateway
 RUN pnpm --filter @verdict/shared build && pnpm --filter @verdict/gateway build
 
-FROM base AS runtime
+# Deliberately NOT `FROM base`: the runtime image must not carry a package
+# manager. `base` runs `corepack enable`, and the root package.json names
+# `packageManager: pnpm@...`, so ANY stray npm/pnpm invocation at container
+# start makes corepack download pnpm and pnpm then tries to write a lockfile
+# into /repo — which root owns and the `node` user cannot write. On Railway
+# that produced ERR_PNPM_LOCKFILE_WRITE_FILE in an endless restart loop, with
+# the build itself perfectly green.
+#
+# A runtime image needs one thing: node. Nothing here should ever resolve a
+# dependency — that already happened in the build stage.
+FROM node:22-alpine AS runtime
+WORKDIR /repo
 ENV NODE_ENV=production
-COPY --from=build /repo/node_modules ./node_modules
-COPY --from=build /repo/package.json ./
-COPY --from=build /repo/packages/shared/dist packages/shared/dist
-COPY --from=build /repo/packages/shared/package.json packages/shared/
-COPY --from=build /repo/packages/shared/node_modules packages/shared/node_modules
-COPY --from=build /repo/apps/gateway/dist apps/gateway/dist
-COPY --from=build /repo/apps/gateway/package.json apps/gateway/
-COPY --from=build /repo/apps/gateway/node_modules apps/gateway/node_modules
-COPY config config
-COPY artifacts artifacts
+
+# --chown on every copy, so the process user owns what it reads. Without it
+# everything lands as root and the app runs as `node`, which is the second half
+# of the failure above.
+COPY --from=build --chown=node:node /repo/node_modules ./node_modules
+COPY --from=build --chown=node:node /repo/package.json ./
+COPY --from=build --chown=node:node /repo/packages/shared/dist packages/shared/dist
+COPY --from=build --chown=node:node /repo/packages/shared/package.json packages/shared/
+COPY --from=build --chown=node:node /repo/packages/shared/node_modules packages/shared/node_modules
+COPY --from=build --chown=node:node /repo/apps/gateway/dist apps/gateway/dist
+COPY --from=build --chown=node:node /repo/apps/gateway/package.json apps/gateway/
+COPY --from=build --chown=node:node /repo/apps/gateway/node_modules apps/gateway/node_modules
+COPY --chown=node:node config config
+COPY --chown=node:node artifacts artifacts
 
 ENV MODELS_CONFIG_PATH=/repo/config/models.yaml
 

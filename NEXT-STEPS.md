@@ -315,16 +315,16 @@ environment validation failed; refusing to start:
   - DATABASE_URL: must be a postgres:// or postgresql:// URL
 ```
 
-| Problem                    | Cause              | Fix                              |
-| -------------------------- | ------------------ | -------------------------------- |
-| Cannot connect to database | wrong Neon string  | use the **pooler** one           |
-| Starts, but requests fail  | key got truncated  | re-paste `GROQ_API_KEY` in full  |
-| Keeps restarting           | a setting is wrong | read the log, fix that one       |
-| Domain does not respond    | port mismatch      | add `GATEWAY_PORT` = `${{PORT}}` |
+| Problem                    | Cause                | Fix                             |
+| -------------------------- | -------------------- | ------------------------------- |
+| Cannot connect to database | wrong Neon string    | use the **pooler** one          |
+| Starts, but requests fail  | key got truncated    | re-paste `GROQ_API_KEY` in full |
+| Keeps restarting           | a setting is wrong   | read the log, fix that one      |
+| Domain does not respond    | build is out of date | redeploy — see D-062 below      |
 
-**On that last one:** Railway tells apps which port to use via a setting called `PORT`. Your
-gateway looks for `GATEWAY_PORT`. Try without it first — it may be fine. If not, add that variable
-typed exactly as shown, including the `${{ }}`.
+**A note on ports.** Railway assigns a port and tells your app via a setting called `PORT`. Your
+gateway reads that automatically now — you do not need to configure anything. (It did not, until a
+real Railway deploy exposed it. See **D-062**.)
 
 ## What Railway costs
 

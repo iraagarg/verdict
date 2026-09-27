@@ -1757,3 +1757,57 @@ the documentation describes the better behaviour. The README's promise was right
 wrong. Softening the sentence would have been faster and would have left a clean clone broken.
 
 ---
+
+## D-062 — The runtime image carries no package manager, and the gateway honours the platform's PORT
+
+**Status:** ACCEPTED · **Date:** 2026-09-27 · **Phase:** P8 (defect, found on a real deploy)
+
+**What happened.** The first real Railway deploy built green and then crash-looped at startup:
+
+```
+Starting Container
+! Corepack is about to download .../pnpm-12.4.1.tgz
+Error: ERR_PNPM_LOCKFILE_WRITE_FILE
+  ╰─▶ Failed to write lockfile content: Permission denied (os error 13) at path "/repo/.tmpchyuqh"
+```
+
+**Two faults, both in the runtime stage.** It was `FROM base`, and `base` runs `corepack enable`;
+the root `package.json` names `packageManager: pnpm@12.4.1`. So any stray package-manager
+invocation at container start made corepack fetch pnpm, and pnpm then tried to write a lockfile
+into `/repo`. Separately, every `COPY` landed as root while the process runs as `node` — so that
+write could never succeed.
+
+**Decision.** The runtime stage is `FROM node:22-alpine` directly, with no corepack, and every
+`COPY` uses `--chown=node:node`. A runtime image needs node and nothing else: dependency resolution
+already happened in the build stage, and an image that _can_ resolve dependencies at start is an
+image that can change under you between restarts.
+
+`/repo` itself stays root-owned. The app only ever reads, and a process that cannot write to its own
+directory is the correct posture.
+
+**The second fix, before it bit.** Railway assigns a port at start and announces it as `PORT`; the
+gateway read only `GATEWAY_PORT`, so it would have bound 8080 while the platform routed elsewhere
+and the health check silently never passed. `loadEnv` now falls back to `PORT` when `GATEWAY_PORT`
+is unset. `GATEWAY_PORT` still wins when both are present, so compose and local runs are unchanged.
+Render, Fly, Heroku and Cloud Run use the same convention.
+
+This lives in `loadEnv` rather than the schema on purpose: Zod's `preprocess` sees only its own
+field, and a fallback between two variables is a property of the pair, not of either one.
+
+**Alternatives rejected.** _Tell the operator to set `GATEWAY_PORT=${{PORT}}` in the Railway UI_ —
+what the docs said before this, and it is a workaround for a bug dressed as configuration; every
+future platform needs the same footnote. _`chmod 777 /repo`_ — makes the symptom go away by letting
+the app rewrite itself at runtime, which is worse than the crash.
+
+**Consequence, and what it says about the earlier verification.** `docker compose up` passed in CI
+on every push, and the gateway ran fine locally for weeks — because compose runs the container as
+root and supplies `GATEWAY_PORT` explicitly. **Both faults were invisible to every check that
+existed.** Neither would have surfaced without a real deployment to a platform that runs containers
+unprivileged and assigns its own port. That is the argument for deploying at all: some classes of
+bug are only reachable from production.
+
+Verified by building the image and running it twice — once plain, once with `PORT=7777` and no
+`GATEWAY_PORT` — confirming `pnpm` is absent from the runtime image and the gateway binds the
+platform's port.
+
+---

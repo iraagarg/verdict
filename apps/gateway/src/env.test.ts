@@ -68,6 +68,23 @@ describe("loadEnv", () => {
     );
   });
 
+  it("uses the platform's PORT when GATEWAY_PORT is not set", () => {
+    // Railway, Render, Fly and Heroku all assign the port at start and
+    // announce it as PORT. Ignoring it binds the wrong port and the platform's
+    // health check never passes (D-062).
+    const { GATEWAY_PORT: _unset, ...noGatewayPort } = BASE;
+    expect(loadEnv({ ...noGatewayPort, PORT: "4567" }).GATEWAY_PORT).toBe(4567);
+  });
+
+  it("prefers GATEWAY_PORT over PORT when both are set", () => {
+    expect(loadEnv({ ...BASE, GATEWAY_PORT: "9001", PORT: "4567" }).GATEWAY_PORT).toBe(9001);
+  });
+
+  it("ignores a blank PORT rather than failing on it", () => {
+    const { GATEWAY_PORT: _unset, ...noGatewayPort } = BASE;
+    expect(loadEnv({ ...noGatewayPort, PORT: "" }).GATEWAY_PORT).toBe(8080);
+  });
+
   it("boots with no REDIS_URL at all", () => {
     // The semantic cache was measured and rejected (D-046/D-047), so nothing
     // connects to Redis. Requiring the URL would make every deployment
