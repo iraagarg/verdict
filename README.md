@@ -182,7 +182,11 @@ changed the project most:
 
 ## Running it
 
-New here? Two guides, both hands-on:
+New here? Start with [`EXPLAINED.md`](EXPLAINED.md) — the whole project from zero: the problem, the
+reasoning, the architecture, the tech stack, and every live piece explained for someone who has
+never seen it.
+
+Then, both hands-on:
 
 - [`START-HERE.md`](START-HERE.md) — six commands, ten minutes, plain words. The
   whole idea of the project end to end.
