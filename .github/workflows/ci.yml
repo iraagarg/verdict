@@ -19,6 +19,24 @@ env:
   COST_CAP_USD_PER_DAY: "1.00"
 
 jobs:
+  secrets:
+    name: No secrets in git history
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # gitleaks scans HISTORY, not just the working tree. A key that was
+          # committed once and removed in the next commit is still published
+          # forever, and a shallow clone would not see it.
+          fetch-depth: 0
+      - name: gitleaks
+        # Run the image directly rather than the marketplace action: the action
+        # asks organisations for a licence key, and pinning a container digest
+        # is a clearer supply-chain story than trusting a moving action tag.
+        run: |
+          docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:latest \
+            detect --source=/repo --no-banner --redact
+
   typescript:
     name: TypeScript (lint, typecheck, test)
     runs-on: ubuntu-latest
