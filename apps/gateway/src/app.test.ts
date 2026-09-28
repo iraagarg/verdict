@@ -113,3 +113,32 @@ describe("gateway app", () => {
     expect(body.dependencies.breakers).toHaveProperty("anthropic", "closed");
   });
 });
+
+describe("GET /", () => {
+  it("serves a machine-readable index by default", async () => {
+    const res = await boot().inject({ method: "GET", url: "/" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { service: string; endpoints: Record<string, string> };
+    expect(body.service).toBe("verdict-gateway");
+    expect(Object.keys(body.endpoints)).toContain("POST /v1/chat/completions");
+  });
+
+  it("serves HTML to a browser", async () => {
+    // The root URL is what someone opens to decide whether this is real. An
+    // OpenAI-shaped 404 was correct and unhelpful (D-069).
+    const res = await boot().inject({
+      method: "GET",
+      url: "/",
+      headers: { accept: "text/html,application/xhtml+xml" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toContain("text/html");
+    expect(res.body).toContain("Verdict gateway");
+  });
+
+  it("still 404s an unknown route, in the OpenAI error shape", async () => {
+    const res = await boot().inject({ method: "GET", url: "/nope" });
+    expect(res.statusCode).toBe(404);
+    expect((res.json() as { error: { type: string } }).error.type).toBe("invalid_request_error");
+  });
+});

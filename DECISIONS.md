@@ -2080,3 +2080,49 @@ trailing `/health`, trailing newline, surrounding spaces, slash-plus-newline —
 HTTP 200, and an unreachable host now yielding exactly `000`.
 
 ---
+
+## D-069 — The gateway's root path answers, instead of 404ing correctly
+
+**Status:** ACCEPTED · **Date:** 2026-09-29 · **Phase:** P8
+
+**What prompted it.** Opening the deployed gateway in a browser returned:
+
+```json
+{
+  "error": {
+    "message": "Unknown route: GET /",
+    "type": "invalid_request_error",
+    "code": "not_found"
+  }
+}
+```
+
+Correct. The gateway is an API, `/` is not a route, and the OpenAI-shaped error envelope is exactly
+what an API client should receive. It was also the wrong answer to the question actually being
+asked, because the person typing that URL into a browser is deciding whether the thing is real, and
+an error page answers "no".
+
+**Decision.** `GET /` is content-negotiated. An `Accept` header containing `text/html` — which is
+every browser — gets a single self-contained page: what the service is, the three endpoints, a
+copy-pasteable curl, and links to the dashboard and the source. Anything else gets the same
+information as JSON. Unknown routes still 404 in the OpenAI shape, and a test pins that.
+
+**Why negotiate rather than pick one.** Serving only JSON keeps the API pure and leaves the browser
+case unserved. Serving only HTML breaks the contract for any client that hits `/` expecting
+machine-readable output. The two audiences want different representations of the same resource,
+which is the case content negotiation exists for; neither is compromised.
+
+**Why the page has no external requests.** No CDN, no font host, no framework — everything inline.
+An index page that needs the network to render can fail in ways the service it describes has not,
+and this page's entire job is to answer "is it up?" truthfully.
+
+**Alternatives rejected.** _Redirect `/` to the dashboard_ — the dashboard is a different service on
+a different host, and a redirect would claim the gateway is fine when the redirect target is the
+only thing proven reachable. _Leave it 404ing_ — defensible, and it costs a visitor their first
+impression for no benefit.
+
+**Consequence.** Three tests: JSON by default, HTML for a browser, and unknown routes still 404 in
+the OpenAI shape. The last one matters most — the point was to add a route, not to soften the error
+contract around it.
+
+---
