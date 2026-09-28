@@ -7,6 +7,15 @@ on:
     paths:
       - "prompts/**"
       - "config/models.yaml"
+    # prompts/README.md matches prompts/** too, so a typo fix in the directory's
+    # own documentation used to start a paid run. Excluded by NAME, not by
+    # extension: prompts here ARE markdown, and filtering .md would stop real
+    # prompt changes triggering evals — a regression shipped unnoticed, which is
+    # much worse than a few cents (D-070). Mirrors touchesPrompts() in ghapp.
+    paths-ignore:
+      - "prompts/README.md"
+      - "prompts/CONTRIBUTING.md"
+      - "prompts/CHANGELOG.md"
 
 # One run per PR. A force-push should replace the in-flight run, not race it.
 concurrency:

@@ -101,7 +101,27 @@ export class DeliveryLog {
   }
 }
 
-/** Does this PR touch prompts? Only those get an eval run, because runs cost money. */
+/**
+ * Does this PR touch a prompt? Only those get an eval run, because runs cost money.
+ *
+ * `prompts/README.md` also starts with the prefix, so a plain prefix test fired a
+ * paid evaluation every time someone fixed a typo in the directory's own
+ * documentation — which is precisely what that README says must not happen
+ * (D-070).
+ *
+ * The exclusion is a list of documentation FILENAMES, not extensions. Prompts
+ * here are themselves Markdown (`prompts/judge.md`), so filtering by `.md` would
+ * have stopped real prompt changes from ever triggering an eval: a regression
+ * shipping unnoticed, which is far worse than an eval that costs a few cents and
+ * is visible in the PR. Where the two errors are this asymmetric, the filter
+ * must fail toward running.
+ */
+const DOC_FILENAMES = new Set(["readme.md", "contributing.md", "changelog.md", ".gitkeep"]);
+
 export function touchesPrompts(filenames: string[], prefix = "prompts/"): boolean {
-  return filenames.some((f) => f.startsWith(prefix));
+  return filenames.some((f) => {
+    if (!f.startsWith(prefix)) return false;
+    const basename = (f.split("/").pop() ?? "").toLowerCase();
+    return !DOC_FILENAMES.has(basename);
+  });
 }

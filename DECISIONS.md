@@ -2126,3 +2126,47 @@ the OpenAI shape. The last one matters most — the point was to add a route, no
 contract around it.
 
 ---
+
+## D-070 — A typo in `prompts/README.md` started a paid evaluation
+
+**Status:** ACCEPTED · **Date:** 2026-09-29 · **Phase:** P8 (defect)
+
+**What was wrong.** Both triggers matched on the prefix `prompts/`:
+
+```ts
+filenames.some((f) => f.startsWith("prompts/"));
+```
+
+`prompts/README.md` starts with `prompts/`. So editing the directory's own
+documentation fired a cost-capped evaluation against real models — the exact behaviour that README
+forbids in writing:
+
+> Evals cost real money, so a documentation change must not start one.
+
+The rule was stated in prose, in the directory it governs, and enforced nowhere.
+
+**Decision.** Both the webhook App (`touchesPrompts`) and the workflow (`paths-ignore`) exclude
+documentation **by filename** — `README.md`, `CONTRIBUTING.md`, `CHANGELOG.md`, `.gitkeep`.
+
+**The first attempt was wrong, and the existing tests caught it.** It excluded every `.md` file,
+which reads sensibly until you notice the test fixture that had been there since P7:
+
+```ts
+expect(touchesPrompts(["README.md", "prompts/judge.md"])).toBe(true);
+```
+
+**Prompts in this project are themselves Markdown.** Filtering by extension would have stopped every
+real prompt change from triggering an eval — a regression shipping unnoticed, which is far worse
+than an eval that costs a few cents and is visible on the PR. The two errors are asymmetric, so the
+filter must fail toward running. A denylist of documentation names does that; an extension filter
+does the opposite.
+
+**Alternatives rejected.** _Allowlist the prompt formats_ — a new format nobody remembered to add
+would silently stop triggering evals, which is the failure direction that matters. _Leave it_ — it
+costs money on every docs commit, and contradicts a rule the project states in writing.
+
+**Consequence.** Five tests pin the behaviour, including the one that matters most: a markdown
+prompt still triggers. Found while trying to demonstrate the bot on a real PR — the feature worked,
+and exercising it exposed a rule that was documented rather than implemented.
+
+---

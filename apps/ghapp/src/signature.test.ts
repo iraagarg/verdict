@@ -172,3 +172,32 @@ describe("touchesPrompts", () => {
     expect(touchesPrompts([])).toBe(false);
   });
 });
+
+describe("touchesPrompts — documentation does not cost money", () => {
+  it("fires on a real prompt file", () => {
+    expect(touchesPrompts(["prompts/support_reply.v2.md"])).toBe(true);
+  });
+
+  it("does NOT fire on the directory's own README", () => {
+    // prompts/README.md starts with the prefix, so a plain prefix test ran a
+    // paid evaluation on a typo fix — the exact thing that README forbids.
+    expect(touchesPrompts(["prompts/README.md"])).toBe(false);
+  });
+
+  it("STILL fires on a markdown prompt — prompts here are markdown", () => {
+    // The first attempt at this fix excluded every .md file, which would have
+    // stopped real prompt changes triggering evals. A regression shipped
+    // unnoticed is far worse than an eval costing a few cents, so the filter
+    // fails toward running.
+    expect(touchesPrompts(["prompts/judge.md"])).toBe(true);
+  });
+
+  it("still fires when a PR changes both docs and a prompt", () => {
+    // One real prompt change is enough; the docs alongside it are irrelevant.
+    expect(touchesPrompts(["prompts/README.md", "prompts/summarize.v1.md"])).toBe(true);
+  });
+
+  it("ignores files outside prompts/ entirely", () => {
+    expect(touchesPrompts(["README.md", "apps/gateway/src/app.ts"])).toBe(false);
+  });
+});
