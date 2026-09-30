@@ -33,16 +33,49 @@ and claims nothing about the traffic the corpus's free-form half represents.
 from __future__ import annotations
 
 import json
+from collections import Counter
 from dataclasses import asdict
 from pathlib import Path
 
 from evald.corpus.schema import CorpusItem
-from evald.corpus.verifiers import verify
+from evald.corpus.verifiers import extract_choice, extract_final_number, verify
 from evald.cost import Usage, cost_nano
 from evald.models_config import ModelConfig
 from evald.replay.cache import ResponseCache, cache_key
 from evald.replay.runner import request_params
 from evald.router.records import ItemRecord
+
+#: Which extractor recovers the answer for each verifier. Agreement is exact
+#: match on the EXTRACTED answer, never on the raw text: two correct solutions
+#: to the same problem are worded differently every time, so comparing prose
+#: would measure phrasing rather than whether the model reached the same
+#: conclusion twice.
+EXTRACTORS = {
+    "final_number": extract_final_number,
+    "choice_letter": extract_choice,
+}
+
+
+def self_consistency(texts: list[str], verifier: str) -> float:
+    """Fraction of samples that reached the modal answer, in [0, 1].
+
+    This is the cascade's escalation signal: a cheap model that answers the same
+    thing five times out of five is probably right, and one that answers three
+    different things is worth escalating. It needs no ground truth, which is the
+    point -- at request time there is none.
+
+    A sample whose answer cannot be extracted counts as its own distinct answer
+    rather than being dropped. Dropping it would make a model that mostly fails
+    to produce a parseable answer look MORE consistent, which inverts the signal.
+    """
+    if not texts:
+        return 0.0
+    extract = EXTRACTORS.get(verifier)
+    answers = [
+        (extract(t) if extract else None) or f"__unparsed_{i}__" for i, t in enumerate(texts)
+    ]
+    counts = Counter(answers)
+    return counts.most_common(1)[0][1] / len(answers)
 
 
 def build_records(
@@ -51,10 +84,19 @@ def build_records(
     config: ModelConfig,
     cache: ResponseCache,
     max_output_tokens: int = 1024,
+    max_replicates: int = 8,
+    require_agreement: bool = True,
 ) -> tuple[list[ItemRecord], dict[str, int]]:
     """Return (records, stats). Reads only the cache; never calls a model."""
     records: list[ItemRecord] = []
-    stats = {"items": 0, "skipped_not_gradable": 0, "skipped_incomplete": 0, "lookups_missed": 0}
+    stats = {
+        "items": 0,
+        "skipped_not_gradable": 0,
+        "skipped_incomplete": 0,
+        "skipped_no_agreement": 0,
+        "lookups_missed": 0,
+    }
+    cheap_model = models[0]
 
     for item in items:
         if item.ground_truth is None or item.verifier is None:
@@ -63,14 +105,27 @@ def build_records(
 
         success: dict[str, bool] = {}
         cost: dict[str, int] = {}
+        agreement: dict[str, float] = {}
 
         for model in models:
             params = request_params(model, config, max_output_tokens)
-            key = cache_key(model, item.messages, params, 0)
-            hit = cache.get(key)
-            if hit is None:
+
+            # Replicate 0 is the graded sample; 1..K-1 exist only where a
+            # replicate pass has run, and only the cheap rung needs them.
+            samples = []
+            for k in range(max_replicates):
+                hit = cache.get(cache_key(model, item.messages, params, k))
+                if hit is None:
+                    break
+                samples.append(hit)
+
+            if not samples:
                 stats["lookups_missed"] += 1
                 continue
+
+            hit = samples[0]
+            if len(samples) > 1:
+                agreement[model] = self_consistency([s["text"] for s in samples], item.verifier)
             success[model] = verify(item.verifier, hit["text"], item.ground_truth)
             cost[model] = cost_nano(
                 model,
@@ -88,6 +143,14 @@ def build_records(
             stats["skipped_incomplete"] += 1
             continue
 
+        # The cascade escalates on the CHEAP model's self-consistency, so a
+        # record without that signal is one it cannot use. Dropping it is not a
+        # judgement call: `records.py` refuses to guess a confidence, and a
+        # default would be a fabricated number driving a routing decision.
+        if require_agreement and cheap_model not in agreement:
+            stats["skipped_no_agreement"] += 1
+            continue
+
         records.append(
             ItemRecord(
                 slug=item.slug,
@@ -95,6 +158,7 @@ def build_records(
                 split=item.split,
                 success=success,
                 cost_nano=cost,
+                agreement=agreement,
             )
         )
         stats["items"] += 1

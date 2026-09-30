@@ -268,14 +268,36 @@ def cmd_pilot(args: argparse.Namespace) -> int:
     items = _pilot_sample(load_corpus(args.corpus), args.n, args.seed)
     models = _models(args, ["openai/gpt-oss-20b", "claude-haiku-4-5", "claude-opus-5"])
 
-    projection = project_run(items, models, config)
+    # Price the replicates, and subtract what the cache already holds. `pilot`
+    # accepted --replicates and then projected as if it were 1, so a K=5 run was
+    # shown at a fifth of its cost and the spend cap was checked against that
+    # fifth. `plan` and `run` had always done this; only `pilot` had not, which
+    # is exactly the command someone reaches for when trying something new and
+    # least able to sanity-check the number (D-075).
+    reps = _replicate_map(items, args.replicate_subset, args.replicates)
+    cache_for_projection = ResponseCache(args.cache)
+    cached = sum(
+        1
+        for item in items
+        for m in models
+        for k in range(reps.get(item.slug, 1))
+        if cache_key(m, item.messages, request_params(m, config, args.max_tokens), k)
+        in cache_for_projection
+    )
+
+    projection = project_run(items, models, config, replicates=reps, already_cached=cached)
     print(projection.render(cap_usd=args.cap))
     if not args.yes and input("\nProceed? [y/N] ").strip().lower() != "y":
         return 1
 
     with GatewayClient(args.gateway) as client:
         stats = run_replay(
-            build_tasks(items, models),
+            # `replay run` has always passed these; `pilot` did not, so
+            # --replicates changed the projection and not the work. Harmless in
+            # the direction it failed -- it under-ran rather than overspent --
+            # but a flag that silently does nothing is worse than no flag
+            # (D-075).
+            build_tasks(items, models, replicates=reps),
             config,
             ResponseCache(args.cache),
             client.complete,

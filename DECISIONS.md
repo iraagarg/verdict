@@ -2335,3 +2335,52 @@ Sonnet, and any artifact produced that way has to say so rather than let a reade
 is now a $2 decision rather than an unknown, which is the useful part: the blocker has a price.
 
 ---
+
+## D-075 — The Pareto curve exists, and it says no
+
+**Status:** ACCEPTED · **Date:** 2026-09-30 · **Phase:** P8 · **Closes the gap D-074 priced**
+
+**What ran.** A replicate pass on the cheap rung only — the cascade escalates on the _cheap_ model's
+self-consistency, so Haiku and Sonnet need one sample each and those were already cached. The cheap
+rung is `gpt-oss-20b`, free on Groq. Projected at **$3.13** across all three models; actual spend
+across two passes: **$0.054**.
+
+**The result.** `artifacts/pareto.json` and `artifacts/policy.json` now exist. The curve, fitted on
+the dev split against an always-Sonnet baseline of 0.857:
+
+| threshold | quality | cost vs all-strong | escalation |
+| --------- | ------- | ------------------ | ---------- |
+| 0.00–0.20 | 0.643   | **0.186**          | 0%         |
+| 0.30–0.65 | 0.786   | 0.907              | 29%        |
+| 0.70–1.00 | 0.786   | 0.939              | 36%        |
+
+**Eighty-one percent cheaper is available, and it costs twenty-one points of quality.** The margin is
+three. Nothing on the curve is acceptable, and the sweep says so rather than picking the closest:
+
+> No threshold on the 'dev' split was shown non-inferior to always using claude-sonnet-5 at a margin
+> of 0.03. Keeping the strong model is the correct outcome, not a failure of the sweep.
+
+The policy routes both gradable routes to `safe_default`, citing `insufficient evidence: 7 items <
+25 minimum` — a second, independent refusal on sample size alone.
+
+**Why this is the answer and not a disappointment.** It is consistent with everything measured
+before it. D-030 found the cheap rung 16 points behind Haiku; the Haiku–Sonnet verdict was
+INCONCLUSIVE at n=60. A curve that suddenly offered a free lunch would have contradicted both and
+should have been distrusted. **`/pareto` is no longer empty** — it shows the real trade-off, and the
+trade-off is bad.
+
+**What it demonstrates that an empty page could not.** The loop closes. Records are rebuilt from
+cache, a sweep runs on the dev split, a policy is written, and the gateway can load it. The mechanism
+is exercised end to end on real measurements; the number it produces happens to be "don't".
+
+**Two limits, stated.** Forty-five usable records, not sixty: Groq returned **517 rate limits** and
+some items never got five samples. Records without a confidence signal are dropped rather than given
+a default, because a fabricated confidence would be driving a routing decision. And `strong_model` is
+Sonnet while the gateway falls back to Opus, so the guarantee is relative to Sonnet — the artifact
+records which.
+
+**An unplanned validation.** Those 517 rate limits opened **zero** circuit breakers. Earlier in this
+project seven of them refused 339 requests (D-027). The fix has now been exercised at seventy times
+the load that originally broke it.
+
+---
