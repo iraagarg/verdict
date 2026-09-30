@@ -13,10 +13,21 @@ client at all: `REDIS_URL` was validated at boot and never connected to. Redis's
 consumer was the semantic cache, which P6 measured and rejected (**D-046**, **D-047**). Requiring
 it would mean provisioning a service to satisfy a schema. It is now optional (**D-059**).
 
-**`apps/evald` is deliberately not deployed.** It exposes only `/health` and `/ready`, nothing
-calls it, and every capability it has runs through its CLI against local files. Deploying it would
-mean paying for a process whose entire production behaviour is answering its own health check. See
-**D-058**.
+## What is deployed, and what is not
+
+Four apps live in this repo. **Two of them are deployed. Two are not, on purpose.**
+
+| App              | Deployed?   | Why                                                                                                                                                                                                                                   |
+| ---------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/gateway`   | **Railway** | It is the API. It has to be reachable.                                                                                                                                                                                                |
+| `apps/dashboard` | **Vercel**  | It is the website.                                                                                                                                                                                                                    |
+| `apps/evald`     | **no**      | Two routes, both health checks, nothing calls them. Every capability runs from its CLI against local files. Deploying it means paying for a process whose entire production behaviour is answering its own health check (**D-058**).  |
+| `apps/ghapp`     | **no**      | `cli.js` is invoked _inside_ the GitHub Action, so it needs no server. `index.ts` is the webhook receiver — built so the signature-verification work is real and reviewable, but the Action is what actually runs on PRs (**D-054**). |
+
+> **If a host offers to deploy `evald` or `ghapp`, decline.** Vercel in particular scans a monorepo
+> and will offer a project per workspace. Accepting one creates a project that builds a thing with
+> no web output, fails, and posts a red ✗ on every commit — for a service nothing was going to call.
+> Two deployed apps is the correct number.
 
 Until you set the secrets below, the Deploy workflow runs, reports which targets are configured,
 and deploys nothing. Main stays green. Add secrets one at a time and each target switches on.
