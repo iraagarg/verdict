@@ -457,6 +457,37 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_records(args: argparse.Namespace) -> int:
+    """Rebuild routing records from the replay cache. Calls no models; free."""
+    from evald.replay.cache import ResponseCache
+    from evald.router.build_records import build_records, write_records
+
+    config = load_model_config(args.config)
+    items = load_corpus(Path(args.corpus))
+    cache = ResponseCache(Path(args.cache))
+    models = [m.strip() for m in args.models.split(",") if m.strip()]
+
+    records, stats = build_records(items, models, config, cache, args.max_tokens)
+
+    print("ROUTING RECORDS from cache (no API calls)")
+    print(f"  models     {', '.join(models)}")
+    print(f"  corpus     {len(items)} items")
+    print(f"  records    {stats['items']}")
+    print(
+        f"  skipped    {stats['skipped_not_gradable']} not gradable, "
+        f"{stats['skipped_incomplete']} missing a model"
+    )
+    if stats["items"] == 0:
+        print("\n  Nothing to write. Every item lacked a cached generation for at least one")
+        print("  model in --models. Narrow --models to what the cache actually holds.")
+        return 1
+
+    out = Path(args.out)
+    write_records(records, out)
+    print(f"\n  wrote {out}")
+    return 0
+
+
 def cmd_fit(args: argparse.Namespace) -> int:
     """Fit the routing policy on TRAIN and report it on HELD-OUT.
 
@@ -485,7 +516,11 @@ def cmd_fit(args: argparse.Namespace) -> int:
     out = fit_and_report(
         records,
         cheap_model=args.cheap_model or ladder[0],
-        strong_model=config.safe_default,
+        # The rung the cheap model is measured against. Defaults to
+        # safe_default, which is what the gateway falls back to — but a fit run
+        # on a subset of the ladder has to name the strongest rung it actually
+        # has data for, and the artifact records which (D-074).
+        strong_model=args.strong_model or config.safe_default,
         ladder=ladder,
         safe_default=config.safe_default,
         created_at=now_iso(),
@@ -840,12 +875,29 @@ def build_parser() -> argparse.ArgumentParser:
     cal.add_argument("--yes", action="store_true")
     cal.set_defaults(func=cmd_calibrate)
 
+    rec = sub.add_parser("records", help="build routing records from the replay cache (free)")
+
+    rec.add_argument("--config", default="../../config/models.yaml")
+
+    rec.add_argument("--corpus", type=Path, default=DEFAULT_CORPUS)
+
+    rec.add_argument("--cache", type=Path, default=DEFAULT_CACHE)
+
+    rec.add_argument("--models", required=True, help="comma-separated, cheapest first")
+
+    rec.add_argument("--max-tokens", type=int, default=1024)
+
+    rec.add_argument("--out", type=Path, default=Path("../../artifacts/routing-records.jsonl"))
+
+    rec.set_defaults(func=cmd_records)
+
     fit = sub.add_parser("fit", help="fit the routing policy and write pareto.json + policy.json")
     fit.add_argument("--config", default="../../config/models.yaml")
     fit.add_argument("--corpus", type=Path, default=DEFAULT_CORPUS)
     fit.add_argument("--records", type=Path, default=Path("../../artifacts/routing-records.jsonl"))
     fit.add_argument("--artifacts", type=Path, default=DEFAULT_ARTIFACTS)
     fit.add_argument("--cheap-model", default="")
+    fit.add_argument("--strong-model", default="")
     fit.add_argument("--judge-model", default="claude-opus-5")
     fit.add_argument("--floor", type=float, default=0.9)
     fit.add_argument("--margin", type=float, default=0.03)

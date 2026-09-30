@@ -2290,3 +2290,48 @@ advertises two and no alias. `gpt-5` and `gpt-5-nano` are absent from both, corr
 OpenAI key is configured anywhere.
 
 ---
+
+## D-074 — Routing records can be rebuilt from the cache; the policy still cannot be fitted
+
+**Status:** ACCEPTED · **Date:** 2026-09-30 · **Phase:** P8
+
+**What prompted it.** A fair objection to the example app: it shows the router reporting
+`router_off` and falling back to the most expensive model. That is not cost-optimal routing — it is
+the _absence_ of it. The headline capability had never been demonstrated because no policy had ever
+been fitted.
+
+**What was recovered.** `.cache/replay` still held **559 generations** from the P2 pilot, already
+paid for. The cache key is deterministic — `sha256(model, messages, params, replicate_idx)` — so
+`evald records` recomputes every key and rebuilds routing records with **no API calls**. Sixty
+complete records across three rungs, from spend that had otherwise produced only two verdicts.
+
+Finding the key needed a brute-force sweep over plausible `max_tokens`: the pilot ran at 2048, not
+the CLI default of 1024. A cache keyed on parameters is exactly reproducible and completely opaque
+about what is in it, which is a fair trade but worth stating.
+
+**Why the fit still fails, and it is not a bug.** The cascade escalates on **self-consistency** —
+ask the cheap model K times, escalate when it disagrees with itself. The cache holds **one sample
+per item**, so there is no confidence signal, and `records.py` refuses rather than inventing one:
+
+> no agreement recorded for 'openai/gpt-oss-20b'. The cascade cannot be fitted without a confidence
+> signal for every item.
+
+**This is why `/pareto` has always been empty.** Not an unrun command — unmade data. The page said
+"no routing policy has been fitted" and named the commands, which was true and incomplete: those
+commands cannot succeed on single-sample records.
+
+**What it would take.** A replicate pass: 60 items × 3 models × 4 further samples. gpt-oss is free
+on Groq; Haiku and Sonnet are roughly **$2** together, extrapolating from the pilot's $0.4925 for
+175 calls. That is the actual price of the Pareto curve, and it is an order of magnitude below the
+$59 previously assumed for a full judged replay — because a policy on the gradable slice needs
+neither the free-form half nor a judge.
+
+**Also decided.** `--strong-model` on `fit`. It defaulted to `safe_default`, which is what the
+gateway falls back to, and a fit run on a subset must name the strongest rung it actually has data
+for. Using Sonnet where the gateway falls back to Opus makes the policy's guarantee relative to
+Sonnet, and any artifact produced that way has to say so rather than let a reader assume Opus.
+
+**Consequence.** The records command is committed and free to re-run. Whether the policy gets fitted
+is now a $2 decision rather than an unknown, which is the useful part: the blocker has a price.
+
+---
