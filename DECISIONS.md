@@ -2206,3 +2206,47 @@ pattern now matches `**/*.mjs`: the narrow version described where such files ha
 rather than what they are, and that distinction only surfaces when a second kind appears.
 
 ---
+
+## D-072 — The browser must not reach the gateway
+
+**Status:** ACCEPTED · **Date:** 2026-09-30 · **Phase:** P8
+
+**Decision.** `examples/app` is a real app — a server, a page, a streaming answer. Its browser talks
+only to its own server, and that server talks to the gateway. The gateway still ships **no CORS
+headers**, and that is now a documented refusal rather than an absence.
+
+```
+browser  →  app server  →  Verdict  →  Groq / Anthropic
+```
+
+**Why not just allow the origin.** It is one line on each side. The gateway holds the provider API
+keys; anything a browser can reach, any browser can reach. An allowed origin is not an
+authorisation — it is a request header, trivially forged outside a browser, and honoured _by_ a
+browser for any page served from that origin. Enabling it would mean the only thing between a
+stranger and your provider bill is a header they control.
+
+Per-user auth and rate limiting belong in the app server, where the identity is, not in a shared
+gateway that has no idea who a user is. That is the same boundary every real product draws, so
+drawing it here makes the example representative rather than convenient.
+
+**What the app exists to show.** The routing headers: which model answered, through which provider,
+and **why**. A plain OpenAI call cannot report any of it, and that reporting is the reason to put a
+gateway in front. The model selector makes the `verdict-auto` path visible.
+
+**The best thing in it is an error.** Choosing `verdict-auto` against the deployed gateway fails:
+
+> No API key is configured for the provider that serves `claude-opus-5`.
+
+With no fitted policy the router falls back to `safe_default` — the strongest, most expensive rung —
+because ambiguity resolves toward quality (D-005). The deployed gateway carries only a Groq key, so
+it **refuses** rather than quietly serving something cheaper. Failing loudly beats downgrading
+silently; a cheap answer nobody asked for is the failure this project exists to prevent. The app
+unwraps the OpenAI error envelope so the message is read rather than dumped.
+
+**Consequence.** Also forced two lint corrections, and the second is the interesting one. Node
+globals had been hand-listed since D-062 — `process`, then `Buffer`, then `fetch`, each added the
+day something broke. A hand-maintained list of a runtime's globals is wrong from the moment the
+runtime gains one until someone trips over it, so the config now takes the published set from
+`globals`. Three consecutive patches to the same line is the signal that the line was the problem.
+
+---

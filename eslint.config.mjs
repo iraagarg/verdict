@@ -1,6 +1,7 @@
 // Flat config. The only rules that matter here are the ones that enforce
 // non-negotiable #5: no `any`, no unchecked external input.
 import js from "@eslint/js";
+import globals from "globals";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
@@ -52,13 +53,14 @@ export default tseslint.config(
      * variable in `next.config.mjs` fails lint while the identical line in a
      * `.ts` file passes.
      */
-    // Every .mjs in this repo is a Node ES module: build config, and the
-    // example consumer app. Scoped to *.config.mjs the first time, which then
-    // failed the moment a second kind of .mjs appeared (D-071) — the narrower
-    // pattern described where such files happened to live, not what they are.
+    // Every .mjs in this repo is a Node ES module: build config, and the example
+    // app. Two corrections got us here. The pattern was `*.config.mjs` until a
+    // non-config .mjs appeared (D-071), and the globals were hand-listed until
+    // the third missing one — `process`, then `Buffer`, then `fetch`. A
+    // hand-maintained list of a runtime's globals is a list that is wrong
+    // between the day the runtime adds one and the day someone uses it, so this
+    // takes the published set instead (D-072).
     files: ["**/*.mjs", "**/*.config.js"],
-    languageOptions: {
-      globals: { process: "readonly", __dirname: "readonly", console: "readonly" },
-    },
+    languageOptions: { globals: globals.node },
   },
 );

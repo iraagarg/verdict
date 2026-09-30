@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ask Anything — powered by Verdict</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0d1117;
+        --panel: #161b22;
+        --line: #26303b;
+        --ink: #e6edf3;
+        --dim: #97a4b2;
+        --accent: #7ee787;
+        --warn: #e3b341;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font:
+          16px/1.6 ui-sans-serif,
+          system-ui,
+          -apple-system,
+          sans-serif;
+        padding: 2rem 1rem 4rem;
+      }
+      main {
+        max-width: 42rem;
+        margin: 0 auto;
+      }
+      h1 {
+        font-size: 1.4rem;
+        margin: 0 0 0.25rem;
+        letter-spacing: -0.01em;
+      }
+      .sub {
+        color: var(--dim);
+        font-size: 0.9rem;
+        margin: 0 0 1.5rem;
+      }
+      form {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+      }
+      textarea {
+        width: 100%;
+        min-height: 5.5rem;
+        resize: vertical;
+        padding: 0.8rem 0.9rem;
+        background: var(--panel);
+        color: var(--ink);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        font: inherit;
+      }
+      textarea:focus,
+      select:focus,
+      button:focus-visible {
+        outline: 2px solid #388bfd;
+        outline-offset: 1px;
+      }
+      .row {
+        display: flex;
+        gap: 0.6rem;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+      label {
+        font-size: 0.85rem;
+        color: var(--dim);
+      }
+      select {
+        background: var(--panel);
+        color: var(--ink);
+        font: inherit;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 0.5rem 0.6rem;
+      }
+      button {
+        background: #238636;
+        color: #fff;
+        border: 0;
+        border-radius: 8px;
+        padding: 0.55rem 1.1rem;
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+        margin-left: auto;
+      }
+      button[disabled] {
+        opacity: 0.5;
+        cursor: default;
+      }
+      .meta {
+        display: none;
+        gap: 1.25rem;
+        flex-wrap: wrap;
+        margin-top: 1.5rem;
+        padding: 0.7rem 0.9rem;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        font-size: 0.82rem;
+      }
+      .meta.on {
+        display: flex;
+      }
+      .meta div {
+        display: flex;
+        flex-direction: column;
+        gap: 0.15rem;
+      }
+      .meta span:first-child {
+        color: var(--dim);
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+      .meta span:last-child {
+        font-family: ui-monospace, Menlo, monospace;
+        color: var(--accent);
+      }
+      .meta .why span:last-child {
+        color: var(--warn);
+      }
+      #answer {
+        margin-top: 1.25rem;
+        white-space: pre-wrap;
+        min-height: 2rem;
+        font-size: 1.02rem;
+      }
+      .err {
+        color: #ff7b72;
+      }
+      footer {
+        margin-top: 2.5rem;
+        padding-top: 1rem;
+        border-top: 1px solid var(--line);
+        color: #6e7d8f;
+        font-size: 0.8rem;
+      }
+      footer a {
+        color: #6cb6ff;
+      }
+      @media (max-width: 420px) {
+        button {
+          margin-left: 0;
+          width: 100%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Ask Anything</h1>
+      <p class="sub">A small app. It calls <strong>Verdict</strong>, not an AI company directly.</p>
+
+      <form id="f">
+        <textarea id="q" placeholder="Ask something…">
+Explain what a circuit breaker is in software, in two sentences.</textarea>
+        <div class="row">
+          <label for="m">Model</label>
+          <select id="m">
+            <option value="openai/gpt-oss-20b">gpt-oss-20b — cheapest</option>
+            <option value="claude-haiku-4-5">claude-haiku-4-5</option>
+            <option value="verdict-auto">verdict-auto — let Verdict choose</option>
+          </select>
+          <button id="go" type="submit">Ask</button>
+        </div>
+      </form>
+
+      <div class="meta" id="meta">
+        <div><span>model</span><span id="mModel">—</span></div>
+        <div><span>provider</span><span id="mProv">—</span></div>
+        <div class="why"><span>why this model</span><span id="mWhy">—</span></div>
+      </div>
+
+      <div id="answer"></div>
+
+      <footer>
+        Gateway <code>__GATEWAY__</code> · <a href="https://verdict-navy.vercel.app">dashboard</a> ·
+        <a href="https://github.com/iraagarg/verdict">source</a><br />
+        The browser never calls the gateway directly — this app's own server does. The gateway holds
+        the provider keys, so anything that can reach it can spend from your account.
+      </footer>
+    </main>
+
+    <script type="module">
+      const $ = (id) => document.getElementById(id);
+      let inFlight = null;
+
+      $("f").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        inFlight?.abort();
+        const controller = new AbortController();
+        inFlight = controller;
+
+        const answer = $("answer");
+        answer.textContent = "";
+        answer.classList.remove("err");
+        $("meta").classList.remove("on");
+        $("go").disabled = true;
+
+        try {
+          const res = await fetch("/api/ask", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ question: $("q").value, model: $("m").value }),
+            signal: controller.signal,
+          });
+
+          if (!res.ok || !res.body) {
+            const t = await res.text().catch(() => "");
+            // The gateway speaks OpenAI's error envelope. Unwrap it rather than
+            // showing raw JSON: these messages are written to be read, and the
+            // most likely one here says the router picked a model this
+            // deployment has no key for — which is the fail-expensive rule
+            // refusing to quietly downgrade, not a bug.
+            let msg = t || `server returned ${res.status}`;
+            try {
+              const j = JSON.parse(t);
+              msg = j?.error?.message ?? j?.error ?? msg;
+            } catch {}
+            throw new Error(msg);
+          }
+
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+
+            // SSE frames are separated by a blank line. Keep the trailing
+            // partial frame in the buffer — a chunk boundary lands mid-frame
+            // often enough that not doing this drops tokens.
+            const frames = buffer.split("\n\n");
+            buffer = frames.pop() ?? "";
+
+            for (const frame of frames) {
+              const isRoute = frame.startsWith("event: route");
+              const line = frame.split("\n").find((l) => l.startsWith("data: "));
+              if (!line) continue;
+              const payload = line.slice(6);
+              if (payload === "[DONE]") continue;
+
+              let json;
+              try {
+                json = JSON.parse(payload);
+              } catch {
+                continue;
+              }
+
+              if (isRoute) {
+                $("mModel").textContent = json.model ?? "—";
+                $("mProv").textContent = json.provider ?? "—";
+                $("mWhy").textContent = json.reason ?? "—";
+                $("meta").classList.add("on");
+              } else {
+                answer.textContent += json.choices?.[0]?.delta?.content ?? "";
+              }
+            }
+          }
+        } catch (err) {
+          if (err.name !== "AbortError") {
+            answer.classList.add("err");
+            answer.textContent = String(err.message ?? err);
+          }
+        } finally {
+          $("go").disabled = false;
+          inFlight = null;
+        }
+      });
+    </script>
+  </body>
+</html>
