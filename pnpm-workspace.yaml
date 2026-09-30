@@ -1,6 +1,10 @@
 packages:
   - "apps/*"
   - "packages/*"
+  # A consumer app, deliberately outside apps/. It depends on the official
+  # OpenAI SDK and on nothing in this repo, which is the only way the
+  # "OpenAI-compatible" claim can be checked rather than asserted.
+  - "examples"
 
 # Dependency build scripts are blocked by default. Approve only what is needed:
 # esbuild is vitest's bundler and cannot run without its postinstall step.

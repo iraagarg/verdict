@@ -210,7 +210,14 @@ clone on every push, which is why the instruction can be trusted.
 Add a provider key to `.env` when you want to call a real model. Without one the stack still comes
 up and the dashboard still shows every committed measurement; only live requests need a key.
 
-The gateway is a drop-in for the OpenAI API — change `baseURL` and nothing else:
+The gateway is a drop-in for the OpenAI API — change `baseURL` and nothing else. A working consumer
+app, using the unmodified official SDK, is in [`examples/`](examples/):
+
+```bash
+pnpm install && node examples/chat.mjs "What is an API gateway? One sentence."
+```
+
+By hand:
 
 ```bash
 curl -N http://localhost:8080/v1/chat/completions \

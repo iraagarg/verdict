@@ -2170,3 +2170,39 @@ prompt still triggers. Found while trying to demonstrate the bot on a real PR �
 and exercising it exposed a rule that was documented rather than implemented.
 
 ---
+
+## D-071 — A consumer app, outside the repo's own code
+
+**Status:** ACCEPTED · **Date:** 2026-09-30 · **Phase:** P8
+
+**What prompted it.** The README has claimed since P1 that the gateway is "a drop-in for the OpenAI
+API — change `baseURL` and nothing else." Nothing in the repository tested that. Every caller was
+either the gateway's own test suite or a `curl`, and neither exercises the thing being claimed: that
+the **unmodified official SDK** works against it.
+
+**Decision.** `examples/` holds a consumer app depending on `openai` and on nothing in this repo —
+not `@verdict/shared`, not a wrapper, not a custom client. It lives outside `apps/` because it is
+not part of the system; it is something that _uses_ the system.
+
+Its only Verdict-specific line is the `baseURL`. Delete that and the same file calls OpenAI
+directly.
+
+**What it demonstrates that curl cannot.** The SDK constructs its own requests, parses SSE its own
+way, and has opinions about response shape. A `curl` proves bytes go in and out; an SDK client
+proves the contract holds for the code people actually write. It also surfaces the routing headers —
+which model answered, through which provider, and **why** — which is the information a plain OpenAI
+call has no way to give you, and therefore the reason to put a gateway in front at all.
+
+**One honest detail the example is built around.** The streaming path reports no cost, and says so.
+HTTP headers are sent before the body; for a streamed answer the token count does not exist until
+the last token is written, so no honest gateway can put a final cost in a streaming response header.
+The example makes a second, non-streaming call to show the cost arriving with
+`x-verdict-usage-final: true`. A demo that quietly omitted the streaming case would have implied a
+capability the protocol forbids.
+
+**Consequence, and a lint pattern corrected.** `eslint.config.mjs` scoped its Node globals to
+`**/*.config.mjs` (D-062). The example is `.mjs` and not config, so it failed lint immediately. The
+pattern now matches `**/*.mjs`: the narrow version described where such files happened to live
+rather than what they are, and that distinction only surfaces when a second kind appears.
+
+---

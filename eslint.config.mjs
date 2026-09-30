@@ -52,7 +52,11 @@ export default tseslint.config(
      * variable in `next.config.mjs` fails lint while the identical line in a
      * `.ts` file passes.
      */
-    files: ["**/*.config.mjs", "**/*.config.js"],
+    // Every .mjs in this repo is a Node ES module: build config, and the
+    // example consumer app. Scoped to *.config.mjs the first time, which then
+    // failed the moment a second kind of .mjs appeared (D-071) — the narrower
+    // pattern described where such files happened to live, not what they are.
+    files: ["**/*.mjs", "**/*.config.js"],
     languageOptions: {
       globals: { process: "readonly", __dirname: "readonly", console: "readonly" },
     },
