@@ -51,6 +51,22 @@ const server = createServer(async (req, res) => {
     return;
   }
 
+  // Proxy the gateway's own model list. The app must not hard-code models: the
+  // same gateway config deployed with different keys serves a different set, so
+  // a hard-coded dropdown is wrong in every environment but one (D-073).
+  if (req.method === "GET" && req.url === "/api/models") {
+    try {
+      const gw = await fetch(`${GATEWAY}/v1/models`, { signal: AbortSignal.timeout(10_000) });
+      const body = await gw.text();
+      res.writeHead(gw.status, { "content-type": "application/json" });
+      res.end(body);
+    } catch (err) {
+      res.writeHead(502, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: `gateway unreachable: ${String(err.message ?? err)}` }));
+    }
+    return;
+  }
+
   if (req.method !== "POST" || req.url !== "/api/ask") {
     res.writeHead(404, { "content-type": "application/json" });
     res.end(JSON.stringify({ error: "not found" }));

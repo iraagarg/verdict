@@ -31,15 +31,30 @@ browser  →  this app's server  →  Verdict  →  Groq / Anthropic
 The trust boundary is the app server. That is also where a real product would put per-user auth and
 rate limits, neither of which belongs in a shared gateway.
 
+## The dropdown is not hard-coded
+
+The page asks the gateway what it can serve (`GET /v1/models`) and builds the list from the answer.
+
+The first version hard-coded three models. Two of them errored, because the deployed gateway holds
+only a Groq key — and no dropdown can know that. The same config deployed with different keys serves
+a different set, so a client has to ask rather than assume (**D-073**).
+
+| Running against                         | You see                                    |
+| --------------------------------------- | ------------------------------------------ |
+| the deployed gateway                    | the two Groq models, and no `verdict-auto` |
+| a local `make up` with an Anthropic key | five models, plus `verdict-auto`           |
+
+`verdict-auto` appears only when `safe_default` is itself servable. Advertising a routing alias that
+resolves to a model this deployment cannot call would be advertising a guaranteed failure.
+
 ## Try the model selector
 
-| Choose             | What happens                                             |
-| ------------------ | -------------------------------------------------------- |
-| `gpt-oss-20b`      | `why: explicit_model` — you named it, the gateway obeyed |
-| `claude-haiku-4-5` | same, a different rung                                   |
-| **`verdict-auto`** | **the gateway chooses**                                  |
+| Choose             | What happens                                          |
+| ------------------ | ----------------------------------------------------- |
+| a named model      | `why: explicit_model` — you asked, the gateway obeyed |
+| **`verdict-auto`** | **the gateway chooses**, and says why                 |
 
-Pick `verdict-auto` against the deployed gateway and you get an error:
+Against the deployed gateway `verdict-auto` is not offered at all. Request it by hand and you get:
 
 > No API key is configured for the provider that serves `claude-opus-5`.
 

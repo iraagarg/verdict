@@ -168,9 +168,7 @@ Explain what a circuit breaker is in software, in two sentences.</textarea>
         <div class="row">
           <label for="m">Model</label>
           <select id="m">
-            <option value="openai/gpt-oss-20b">gpt-oss-20b — cheapest</option>
-            <option value="claude-haiku-4-5">claude-haiku-4-5</option>
-            <option value="verdict-auto">verdict-auto — let Verdict choose</option>
+            <option value="">loading…</option>
           </select>
           <button id="go" type="submit">Ask</button>
         </div>
@@ -195,6 +193,34 @@ Explain what a circuit breaker is in software, in two sentences.</textarea>
     <script type="module">
       const $ = (id) => document.getElementById(id);
       let inFlight = null;
+
+      // Ask the gateway what it can serve rather than hard-coding a list. The
+      // first version of this page offered three models and two of them errored,
+      // because the deployed gateway holds only a Groq key — a dropdown cannot
+      // know that, so it has to ask (D-073).
+      (async () => {
+        const sel = $("m");
+        try {
+          const res = await fetch("/api/models");
+          const { data } = await res.json();
+          if (!Array.isArray(data) || data.length === 0) throw new Error("no models available");
+          sel.innerHTML = "";
+          for (const m of data) {
+            const o = document.createElement("option");
+            o.value = m.id;
+            o.textContent = m.verdict
+              ? `${m.id} — $${m.verdict.input_usd_per_mtok}/M in · ${m.verdict.rung}`
+              : `${m.id} — let Verdict choose`;
+            sel.append(o);
+          }
+        } catch (err) {
+          sel.innerHTML = "";
+          const o = document.createElement("option");
+          o.textContent = `could not load models: ${err.message ?? err}`;
+          sel.append(o);
+          $("go").disabled = true;
+        }
+      })();
 
       $("f").addEventListener("submit", async (e) => {
         e.preventDefault();

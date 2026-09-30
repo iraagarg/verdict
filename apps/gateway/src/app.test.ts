@@ -142,3 +142,46 @@ describe("GET /", () => {
     expect((res.json() as { error: { type: string } }).error.type).toBe("invalid_request_error");
   });
 });
+
+describe("GET /v1/models", () => {
+  it("lists only models this deployment holds a key for", () => {
+    // BASE configures ANTHROPIC_API_KEY and nothing else, so Groq and OpenAI
+    // models must not appear however many are in models.yaml (D-073).
+    return boot()
+      .inject({ method: "GET", url: "/v1/models" })
+      .then((res) => {
+        expect(res.statusCode).toBe(200);
+        const body = res.json() as { object: string; data: { id: string; owned_by: string }[] };
+        expect(body.object).toBe("list");
+        expect(body.data.length).toBeGreaterThan(0);
+        for (const m of body.data) {
+          expect(["anthropic", "verdict"]).toContain(m.owned_by);
+        }
+        expect(body.data.some((m) => m.owned_by === "groq")).toBe(false);
+      });
+  });
+
+  it("advertises verdict-auto only when safe_default is servable", () => {
+    // safe_default is claude-opus-5 and BASE has an Anthropic key, so the
+    // alias is honest here. Advertising it without that key would be
+    // advertising a guaranteed failure.
+    return boot()
+      .inject({ method: "GET", url: "/v1/models" })
+      .then((res) => {
+        const body = res.json() as { data: { id: string }[] };
+        expect(body.data.some((m) => m.id === "verdict-auto")).toBe(true);
+      });
+  });
+
+  it("sorts cheapest first, so a client can pick sensibly", () => {
+    return boot()
+      .inject({ method: "GET", url: "/v1/models" })
+      .then((res) => {
+        const body = res.json() as {
+          data: { id: string; verdict?: { input_usd_per_mtok: number } }[];
+        };
+        const priced = body.data.filter((m) => m.verdict).map((m) => m.verdict!.input_usd_per_mtok);
+        expect(priced).toEqual([...priced].sort((a, b) => a - b));
+      });
+  });
+});

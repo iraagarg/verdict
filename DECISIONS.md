@@ -2250,3 +2250,43 @@ runtime gains one until someone trips over it, so the config now takes the publi
 `globals`. Three consecutive patches to the same line is the signal that the line was the problem.
 
 ---
+
+## D-073 — `GET /v1/models` lists what this deployment can actually serve
+
+**Status:** ACCEPTED · **Date:** 2026-09-30 · **Phase:** P8
+
+**What exposed it.** The example app's dropdown hard-coded three models. Two of them failed:
+
+> No API key is configured for the provider that serves `claude-haiku-4-5`.
+
+The gateway was right — the deployed instance carries only a Groq key. The app was wrong, and no
+amount of care in the app could have made it right: **the servable set is a property of the
+deployment, not of the config.** The same `models.yaml` deployed with different keys serves a
+different list. A hard-coded dropdown is correct in exactly one environment and wrong in every
+other.
+
+**Decision.** Implement `GET /v1/models`, part of the OpenAI surface this gateway claims to speak
+and missing until a client needed it. It returns only models where `isServable` holds — this process
+has credentials for the provider behind them — cheapest first, with rung and price as Verdict
+extensions that OpenAI clients ignore. The example app builds its dropdown from it.
+
+`verdict-auto` is listed **only when `safe_default` is itself servable**. Advertising a routing alias
+that resolves to a model this deployment cannot call is advertising a guaranteed failure.
+
+**The `created` field.** OpenAI sends a unix timestamp. Nothing here has a meaningful model creation
+date, and inventing one would be a fabricated number in a project whose first rule forbids them — so
+it reports when that model's pricing was last verified. Real, checkable, and already required by the
+config schema.
+
+**Alternatives rejected.** _Have the app read `config/models.yaml`_ — it would then know the ladder
+and not the keys, which is the half that varies; also couples a consumer app to the server's
+internals. _List everything and let requests fail_ — the current behaviour, which is what produced a
+UI offering three choices where two were broken.
+
+**Consequence.** Three tests: only key-backed providers appear, `verdict-auto` is conditional, and
+the list is sorted cheapest-first so a client can choose sensibly without a price table. Verified
+against both deployments — the local gateway advertises five models plus the alias; the deployed one
+advertises two and no alias. `gpt-5` and `gpt-5-nano` are absent from both, correctly, because no
+OpenAI key is configured anywhere.
+
+---

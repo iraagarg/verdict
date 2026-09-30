@@ -8,6 +8,7 @@ import Fastify, { LogController } from "fastify";
 import { randomUUID } from "node:crypto";
 import { createLogger } from "./logger.js";
 import { registerChatRoutes } from "./routes/chat.js";
+import { registerModelRoutes } from "./routes/models.js";
 import type { GatewayApp } from "./http.js";
 import type { GatewayServices } from "./services.js";
 import type { Env } from "./env.js";
@@ -164,6 +165,7 @@ statistical quality floor &mdash; and refuses to route cheap when it cannot prov
   });
 
   registerChatRoutes(app, services);
+  registerModelRoutes(app, services);
 
   app.setNotFoundHandler(async (req, reply) => {
     // OpenAI-shaped error body, so a client's error parser keeps working.
