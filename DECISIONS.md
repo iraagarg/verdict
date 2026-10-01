@@ -2384,3 +2384,71 @@ project seven of them refused 339 requests (D-027). The fix has now been exercis
 the load that originally broke it.
 
 ---
+
+## D-076 — The cascade was fitted on a pair where no threshold could win
+
+**Status:** ACCEPTED · **Date:** 2026-10-01 · **Phase:** P8 · **Supersedes D-075's conclusion**
+
+**The objection that forced this.** "It only picks the most expensive model — it doesn't demonstrate
+cost-optimal routing." Correct, and the cause was a design error present since P5.
+
+**What was wrong.** The cascade compared `gpt-oss-20b` against `claude-sonnet-5`:
+
+|                      | price gap | quality gap  |
+| -------------------- | --------- | ------------ |
+| gpt-oss-20b → sonnet | **33×**   | 18 points    |
+| haiku → sonnet       | **2×**    | **0 points** |
+
+With a 33× gap, escalating a quarter of requests costs eight times the cheap price — the saving is
+gone before it starts. An 18-point quality deficit _forces_ frequent escalation. **No threshold on
+that curve can succeed**, so D-075's "the Pareto curve says no" was answering a question whose
+answer was fixed by the choice of pair, not by the data.
+
+The saving was one rung up the whole time, and the project's own pilot had measured it: Haiku and
+Sonnet at 81.7% each, Sonnet at twice the price.
+
+**What the scaled run found, which is better than expected.** 197 paired items, up from 60:
+
+```
+effect  -0.0457  [-0.0914, +0.0000]     rates 0.8985 -> 0.8528
+```
+
+**The two models are not identical. The cheaper one is ahead by 4.6 points**, and the interval's
+upper bound is exactly zero — Sonnet is never better. At n=60 the estimate was exactly 0.0000 with
+p = 1.0, which is as clean a "same" as a measurement produces, and it had the direction wrong.
+
+Had the system reported EQUIVALENT at n=60 it would have published a claim the larger sample
+contradicts. It reported INCONCLUSIVE, which cost nothing and was true. **That refusal is the
+project, and it is worth more than the saving it delayed.**
+
+**The policy, and why it has no cascade.** A route-level fit on those records:
+
+```
+math_word_problem  -> claude-haiku-4-5   n=167  ci_low 0.863 >= floor 0.823
+multiple_choice    -> claude-sonnet-5    n=30   no rung cleared the floor
+```
+
+`cascade: null`. Escalation exists to recover quality a much cheaper model loses, and costs the cheap
+call _plus_ the strong one — it only pays when the price gap is large and escalation rare. At 2×
+with a rung already proven non-inferior there is nothing to escalate, and a self-consistency pass
+would add cost for no decision. **The right router here is not a cascade.**
+
+**Verified live.** One request shape, three decisions, each with its reason on the response:
+
+| `x-verdict-route`   | served                                              |
+| ------------------- | --------------------------------------------------- |
+| `math_word_problem` | **claude-haiku-4-5** — half price, floor cleared    |
+| `multiple_choice`   | claude-sonnet-5 — insufficient evidence             |
+| _(absent)_          | claude-opus-5 — unrecognised routes get no discount |
+
+**Cost.** $4.75 before the Anthropic balance ran out at 62% of the planned run. The result arrived
+anyway, because 197 paired items was enough to change the answer even though it was not enough to
+prove equivalence.
+
+**Two limits that remain.** `resolution 0.0457` still exceeds the 0.03 margin, so the verdict is
+INCONCLUSIVE — the _route_ policy clears its floor on a one-sided test, which is a weaker and
+different claim than EQUIVALENT, and the artifact keeps them distinct. And every figure here is
+exact-match verifier correctness: the judge has never been calibrated, so the 300 free-form items
+have still produced nothing.
+
+---

@@ -81,22 +81,29 @@ A pilot across three model tiers produced this:
 Haiku and Sonnet scored **identically**. Sonnet costs 2× more per token. The obvious conclusion is
 "route everything to Haiku and halve the bill."
 
-Verdict refuses to draw it:
+Verdict refused to draw it — and refusing was right, because the next measurement changed the
+answer. Scaling the same comparison from 60 paired items to 197:
 
 ```
 VERDICT: INCONCLUSIVE
   claude-haiku-4-5 -> claude-sonnet-5
-  effect        +0.0000  [-0.1000, +0.1000]  (95% CI)
-  rates         0.8167 -> 0.8167
-  n             60 items, 8 discordant
+  effect        -0.0457  [-0.0914, +0.0000]  (95% CI)
+  rates         0.8985 -> 0.8528
+  n             197 items, 23 discordant
   margin        +/-0.0300
-  resolution    0.1000   (too wide to ever show EQUIVALENT at this margin)
-  McNemar p     1.000000  (exact, 8 discordant)
+  resolution    0.0457   (too wide to ever show EQUIVALENT at this margin)
+  McNemar p     0.093140  (exact, 23 discordant)
 ```
 
-A point estimate of exactly zero and a p-value of exactly 1.0 — and the honest answer is still
-**we cannot tell**. Sixty items resolve to ±10 percentage points, so a genuine 8-point gap would
-look identical to what was observed. Separating these two rungs needs roughly 667 paired items.
+**The two models are not identical. The cheaper one is ahead by 4.6 points, and the interval's upper
+bound is exactly zero — Sonnet is never better.** At sixty items that was invisible: a point estimate
+of exactly 0.0000 and a p-value of exactly 1.0, which is as clean a "they are the same" as a
+measurement ever produces, and it was wrong about the direction.
+
+Had the system reported EQUIVALENT at n=60 it would have published a claim the larger sample
+contradicts. It reported INCONCLUSIVE instead, which cost nothing and was true.
+
+**That refusal is the entire project**, and it is worth more than the saving it delayed.
 
 This is the distinction the system exists to enforce. "No significant difference" conflates two
 opposite findings, and only one of them justifies spending less:
@@ -141,9 +148,16 @@ Measured numbers are rare and expensive, so this section is explicit about which
 - The semantic cache's _live_ path. It is calibrated and the answer was "do not deploy", so the
   gateway serves no semantic cache.
 
-**Not claimed:** any cost saving. The routing machinery works and is tested end to end, but the
-corpus has not been replayed at the scale needed to fit a policy worth deploying. A savings figure
-without that would be exactly the kind of number this project is built to refuse.
+**Claimed, and demonstrated:** a per-route policy fitted on 197 paired items, loaded by the live
+gateway. `verdict-auto` with `x-verdict-route: math_word_problem` serves **claude-haiku-4-5** — half
+Sonnet's price — because that route's CI lower bound (86.3%) clears the quality floor (82.3%). The
+same request with `multiple_choice` serves Sonnet, because 30 items is not enough evidence to go
+cheaper. With no route hint at all it serves Opus. Three different decisions, one request shape,
+each with its reason on the response.
+
+**Still not claimed:** a saving on free-form traffic. The judge has never been calibrated against a
+human, so every figure here is exact-match verifier correctness on the gradable slice. The 300
+free-form items — the half that most resembles production — have produced no measurement at all.
 
 Rule enforced throughout: **a number that is not in a committed artifact does not exist.** Nothing
 in this README was typed by hand; every figure is read from `artifacts/`.

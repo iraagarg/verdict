@@ -489,7 +489,14 @@ def cmd_records(args: argparse.Namespace) -> int:
     cache = ResponseCache(Path(args.cache))
     models = [m.strip() for m in args.models.split(",") if m.strip()]
 
-    records, stats = build_records(items, models, config, cache, args.max_tokens)
+    records, stats = build_records(
+        items,
+        models,
+        config,
+        cache,
+        args.max_tokens,
+        require_agreement=not args.no_require_agreement,
+    )
 
     print("ROUTING RECORDS from cache (no API calls)")
     print(f"  models     {', '.join(models)}")
@@ -908,6 +915,14 @@ def build_parser() -> argparse.ArgumentParser:
     rec.add_argument("--models", required=True, help="comma-separated, cheapest first")
 
     rec.add_argument("--max-tokens", type=int, default=1024)
+    rec.add_argument(
+        "--no-require-agreement",
+        action="store_true",
+        help=(
+            "keep records lacking a self-consistency signal; "
+            "the route-level policy does not need one"
+        ),
+    )
 
     rec.add_argument("--out", type=Path, default=Path("../../artifacts/routing-records.jsonl"))
 

@@ -147,6 +147,10 @@ def build_records(
         # record without that signal is one it cannot use. Dropping it is not a
         # judgement call: `records.py` refuses to guess a confidence, and a
         # default would be a fabricated number driving a routing decision.
+        # Self-consistency is the CASCADE's escalation signal. A route-level
+        # policy needs no such signal: it compares models over a whole route and
+        # assigns one, so there is nothing to escalate. Requiring agreement there
+        # would discard usable evidence to satisfy a mechanism not in use.
         if require_agreement and cheap_model not in agreement:
             stats["skipped_no_agreement"] += 1
             continue
