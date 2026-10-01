@@ -160,11 +160,13 @@ swapped, different answers, 99.86% similar.
 
 ## Beat 9 · 1:26–1:30 · The close
 
-**Screen:** `README.md` scrolled to the _Status_ section, on **"Not claimed: any cost saving."**
+**Screen:** `README.md` scrolled to _The result worth reading first_, on the two verdict blocks —
+the n=60 one above the n=197 one.
 
-> "I built a cost-optimisation tool and I'm not claiming a cost saving — because I haven't run the
-> replay that would prove one. Every number here comes from a committed artifact, and CI fails if
-> the README disagrees with one."
+> "At sixty items these two models looked identical — effect exactly zero, p exactly one. My system
+> said inconclusive anyway. At a hundred and ninety-seven, the cheaper one is four points ahead. The
+> first answer had the direction wrong, and refusing to call it is the only reason I didn't publish
+> it. Every number here comes from a committed artifact, and CI fails if the README disagrees."
 
 Hold two seconds. End.
 

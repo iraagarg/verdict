@@ -612,10 +612,10 @@ https://verdict-navy.vercel.app
 
 Two coloured boxes:
 
-|                                          |                      |
-| ---------------------------------------- | -------------------- |
-| 🟡 **INCONCLUSIVE** `haiku → sonnet`     | effect 0.00pp, n=60  |
-| 🟢 **IMPROVEMENT** `gpt-oss-20b → haiku` | effect 16.07pp, n=56 |
+|                                          |                       |
+| ---------------------------------------- | --------------------- |
+| 🟡 **INCONCLUSIVE** `haiku → sonnet`     | effect −4.57pp, n=197 |
+| 🟢 **IMPROVEMENT** `gpt-oss-20b → haiku` | effect 16.07pp, n=56  |
 
 **Those two boxes together are the proof the system works.** Given a real gap it committed straight
 away. Given no visible gap it refused to conclude. A system that only ever said "inconclusive" would
@@ -673,7 +673,7 @@ Every value in that range is a meaningful improvement. So: IMPROVEMENT, no hedgi
 
 Other fields:
 
-- **Resolution ±10.0pp** — the smallest difference 60 questions can detect
+- **Resolution ±4.6pp** — the smallest difference 197 questions can detect
 - **Discordant 8** — questions where the two models disagreed. **Only these carry information.**
   The 52 they both got right or both got wrong tell you nothing.
 - **McNemar p 1.000000** — as strong an "identical" as a p-value ever gets, and the system **still**
@@ -701,29 +701,61 @@ The caption underneath is the detail worth noticing:
 
 ## Measured, in committed files
 
-- Three models' pass rates on 60 questions
-- Two statistical verdicts
+- Three models' pass rates on the gradable slice
+- **Haiku vs Sonnet on 197 paired items** — the comparison that changed its own answer
 - Cache calibration: 200 paraphrases against 600 hard negatives
 - Load test: **+0ms p50, +6ms p99, 158,790 requests/minute, zero errors**
-- Total spent: **$0.49**
+- **A fitted routing policy**, loaded by the gateway
+- Total spent: **$5.29**
 
-## Built and tested, never run for real
+## The saving, and what backs it
 
-- **The judge and its labelling tool.** Needs ~200 human labels — hours of your time.
-- **The routing policy.** Needs a full run, ~$59.
+```
+math_word_problem  ->  claude-haiku-4-5    half Sonnet's price
+multiple_choice    ->  claude-sonnet-5     30 items, not enough evidence
+(no route hint)    ->  claude-opus-5       unrecognised routes get no discount
+```
 
-## Deliberately not claimed
+Maths goes to the cheap model because that route's confidence interval **lower** bound is 86.3% and
+the quality floor is 82.3%. Not "it looked fine" — the worst case the data allows is still above the
+bar.
 
-**Any cost saving.**
+Multiple-choice stays expensive on 30 items. The evidence is not there, so the discount is not given.
 
-The routing works and is tested end to end. But the full run needed to fit a policy worth deploying
-has not happened. **A savings figure without that would be exactly the kind of number this project
-exists to refuse.**
+**One request shape, three decisions, each with its reason on the response.** That is the loop the
+project exists to close.
+
+## The result that justifies the whole design
+
+At 60 items, Haiku and Sonnet scored **identically** — 81.7% each, effect exactly 0.0000, p exactly
+1.0. As clean a "they are the same" as a measurement ever produces.
+
+At 197 items:
+
+```
+effect  -0.0457  [-0.0914, +0.0000]     rates 0.8985 -> 0.8528
+```
+
+**The cheaper model is ahead by 4.6 points, and the expensive one is never better.** The n=60 result
+was not merely imprecise — it had the _direction_ wrong.
+
+Had the system reported EQUIVALENT then, it would have published a claim the larger sample
+contradicts. It reported INCONCLUSIVE, which cost nothing and was true.
+
+**That refusal is the project.** Everything else is plumbing around it.
+
+## Still not claimed
+
+**Any saving on free-form traffic.** Every figure above is exact-match verifier correctness on maths
+and multiple choice. The judge has never been calibrated against a human, so the 300 free-form items
+— the half that most resembles production — have produced no measurement at all.
 
 ## Honest limitations
 
-- **The headline comparison is underpowered.** 60 questions resolves to ±10 points. Separating Haiku
-  from Sonnet properly needs about 667.
+- **The headline comparison is still underpowered.** 197 items resolves to ±4.6 points against a
+  3-point margin, so the _verdict_ remains INCONCLUSIVE. The _route policy_ clears its floor on a
+  one-sided test, which is a weaker and different claim — the artifacts keep the two apart. Proving
+  equivalence outright needs roughly 460 paired items.
 - **The judge has never been calibrated.** No human has labelled anything, so there is no evidence
   it agrees with a person. Every verdict therefore uses exact-match marking on the gradable
   questions only — the 300 free-form questions, the half that most resembles real traffic, have
