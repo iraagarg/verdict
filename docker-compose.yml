@@ -80,8 +80,16 @@ services:
       COST_CAP_USD_PER_DAY: ${COST_CAP_USD_PER_DAY:-5.00}
       # Point a provider at a local mock to exercise streaming without spending
       # money. Unset in normal use.
-      ROUTER_MODE: ${ROUTER_MODE:-off}
-      POLICY_PATH: ${POLICY_PATH:-}
+      # ON by default, because the repository now ships a FITTED policy.
+      #
+      # It defaulted to off while no policy existed, which was right then and
+      # became the reason every demo showed `router_off` and the most expensive
+      # model — the headline capability disabled in the default experience
+      # (D-079). The safety rule was never "do not route"; it was "do not route
+      # cheap without proof", and artifacts/policy.json is that proof. Override
+      # with ROUTER_MODE=off in .env to see the fallback behaviour.
+      ROUTER_MODE: ${ROUTER_MODE:-offline}
+      POLICY_PATH: ${POLICY_PATH:-/repo/artifacts/policy.json}
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
       GROQ_BASE_URL: ${GROQ_BASE_URL:-}

@@ -181,6 +181,39 @@ export interface PilotArtifact {
   pilot_models: string[];
 }
 
+/**
+ * The fitted routing policy — the thesis, as a file the gateway loads.
+ *
+ * This was missing from the dashboard until someone pointed out that the site
+ * showed every measurement EXCEPT the decision those measurements exist to
+ * justify (D-079). A visitor could read the verdicts, the Pareto curve and the
+ * spend, and still never see that traffic gets routed differently because of
+ * them.
+ */
+export interface PolicyRoute {
+  route_key: string;
+  assigned_model: string;
+  n_items: number;
+  quality: number;
+  ci_low: number;
+  ci_high: number;
+  floor: number;
+  reason: string;
+}
+
+export interface PolicyArtifact {
+  policy_version: number;
+  created_at: string;
+  git_sha: string;
+  safe_default: string;
+  floor: number;
+  margin: number;
+  routes: PolicyRoute[];
+  cascade: unknown | null;
+}
+
+export const loadPolicy = (): PolicyArtifact | null => read<PolicyArtifact>("policy.json");
+
 export const loadPareto = (): ParetoArtifact | null => read<ParetoArtifact>("pareto.json");
 export const loadCache = (): CacheCalibration | null =>
   read<CacheCalibration>("cache-calibration.json");

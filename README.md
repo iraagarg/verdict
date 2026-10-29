@@ -28,8 +28,9 @@ answer: at 60 items the two models looked _identical_ — effect exactly `0.0000
 at 197 the cheaper one is **4.6 points ahead**. The first result had the direction wrong. The system
 reported `INCONCLUSIVE` rather than `EQUIVALENT`, which cost nothing and was true.
 
-**Live dashboard:** [verdict-navy.vercel.app](https://verdict-navy.vercel.app) — every figure on
-this page, rendered from the committed artifacts.
+**Live dashboard:** [the routing policy](https://verdict-navy.vercel.app/routing) — each route's
+confidence interval drawn against the quality floor it has to clear, plus every other figure on this
+page, rendered from the committed artifacts.
 
 **The gateway runs locally, in one command.** It was hosted for a month; that instance is gone, and
 the links are not left pointing at it. A dead link is worse than an honest one.

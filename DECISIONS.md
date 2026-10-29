@@ -2528,3 +2528,43 @@ variable is removed — green because there is nothing to verify, not because a 
 Restoring a hosted gateway later means setting the variable again and the check comes back.
 
 ---
+
+## D-079 — The thesis had to be the default, not a flag
+
+**Status:** ACCEPTED · **Date:** 2026-10-29 · **Phase:** P8 · **Supersedes D-005's default**
+
+**The objection, repeated three times.** "It doesn't demonstrate cost-optimal routing." Correct every
+time, and the last two causes were not the statistics — they were defaults.
+
+**Cause 1: the router shipped off.** `docker-compose.yml` set `ROUTER_MODE: ${ROUTER_MODE:-off}`.
+That was right while no policy existed; after D-076 fitted one it meant **every `make up` showed
+`router_off` and the most expensive model.** The headline capability was disabled in the only
+experience anyone actually has.
+
+The safety rule was never "do not route". It was "do not route cheap **without proof**" (D-005), and
+`artifacts/policy.json` is that proof — committed, versioned, and refused at boot if it names a model
+the deployment cannot serve. Defaulting to off made the default experience contradict the thesis.
+Now `offline` with the committed policy; `ROUTER_MODE=off` in `.env` still shows the fallback.
+
+**Cause 2: the dashboard never read the policy.** Five pages of measurements and not one showed the
+**decision those measurements exist to justify.** A visitor could read every verdict, the Pareto
+curve and the spend breakdown and still never learn that traffic gets routed differently because of
+them. `/routing` is now the first tab.
+
+**What the page shows, and why it is drawn that way.** Each route gets its interval drawn against the
+floor, with everything below the floor shaded as the region a cheap rung may not enter. The caption
+points at the **left** edge, because that is the number doing the work: routing cheap is justified
+when the _worst case the data allows_ clears the bar, not when the average looks fine. `multiple_choice`
+renders with its interval visibly short of the line — the refusal is as legible as the approval.
+
+**One thing the page deliberately does not do.** It calls a route "discounted" based on
+`ci_low >= floor`, which is the condition the policy actually applied — not by comparing prices. The
+dashboard does not read `models.yaml`, and a page that asserted "this is cheaper" without citing a
+price it holds would be stating something it cannot support.
+
+**Consequence.** Verified end to end: a plain `docker compose up` now serves haiku on
+`math_word_problem`, sonnet on `multiple_choice`, and opus with no route header — all three recorded
+on the trace rows with `policy_version 1`. The gap between "the project can do this" and "the project
+shows it doing this" was two defaults and a missing page.
+
+---
