@@ -2,16 +2,35 @@
 
 [![CI](https://github.com/iraagarg/verdict/actions/workflows/ci.yml/badge.svg)](https://github.com/iraagarg/verdict/actions/workflows/ci.yml)
 
-An OpenAI-compatible LLM gateway that records real traffic, replays it against candidate models,
-judges quality with a human-calibrated evaluator, decides regression-vs-noise with proper
-statistics, and uses that measurement to route live traffic to the cheapest model that still clears
-a statistical quality floor.
+An OpenAI-compatible LLM gateway that routes each request to the cheapest model it can **prove**
+clears a quality floor — and refuses to route cheap when it cannot prove it.
 
 > Existing tools (LangSmith, Braintrust, Promptfoo) measure LLM quality but do not close the loop to
 > automatic cost-optimal routing with a proven quality guarantee. Verdict does.
 
+### The whole thesis, in one request shape
+
+Three identical requests. Three different models. Each decision is a measurement, and the gateway
+reports which one it made and why:
+
+```
+POST /v1/chat/completions   {"model": "verdict-auto"}
+
+  x-verdict-route: math_word_problem  →  claude-haiku-4-5   half price · CI low 86.3% ≥ floor 82.3%
+  x-verdict-route: multiple_choice    →  claude-sonnet-5    30 items · insufficient evidence
+  (no route header)                   →  claude-opus-5      unrecognised route gets no discount
+```
+
+**Cheap where it is proven safe. Expensive where it is not. Safest when it does not know.**
+
+That policy was fitted on **197 paired items**, and the measurement that produced it changed its own
+answer: at 60 items the two models looked _identical_ — effect exactly `0.0000`, p exactly `1.0` — and
+at 197 the cheaper one is **4.6 points ahead**. The first result had the direction wrong. The system
+reported `INCONCLUSIVE` rather than `EQUIVALENT`, which cost nothing and was true.
+
 **Live:** [dashboard](https://verdict-navy.vercel.app) ·
-[gateway health](https://verdictgateway-production.up.railway.app/health)
+[gateway](https://verdictgateway-production.up.railway.app) ·
+[run it in one command](#running-it)
 
 ```bash
 curl -N https://verdictgateway-production.up.railway.app/v1/chat/completions \
@@ -20,8 +39,12 @@ curl -N https://verdictgateway-production.up.railway.app/v1/chat/completions \
        "messages":[{"role":"user","content":"Say hello"}]}'
 ```
 
-That is the real gateway, on the internet, in front of a real provider. The dashboard shows only
-measurements that exist — two pages are deliberately empty, and say which command would fill them.
+|                                          |                                                           |
+| ---------------------------------------- | --------------------------------------------------------- |
+| Proxy overhead                           | **+0 ms p50, +6 ms p99** at 158,790 req/min, zero errors  |
+| Test suite                               | 675 tests · TypeScript strict + `mypy --strict`, no `any` |
+| Engineering decisions recorded           | **76**, each with its rejected alternatives               |
+| Total spent to produce every number here | **$5.29**                                                 |
 
 ---
 

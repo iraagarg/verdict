@@ -35,8 +35,13 @@ def load(name: str) -> dict[str, Any]:
 
 
 def dig(d: Any, path: str) -> Any:
+    """Walk a dotted path. A numeric segment indexes a list.
+
+    Needed once the README began quoting the policy's first route, which lives
+    at routes.0 — not every artifact is a flat object.
+    """
     for part in path.split("."):
-        d = d[part]
+        d = d[int(part)] if part.isdigit() and isinstance(d, list) else d[part]
     return d
 
 
@@ -119,6 +124,31 @@ CHECKS: list[Check] = [
         "client_bytes_ratio",
         lambda v: f"{v:g}× the bytes",
         "the residual asymmetry, disclosed rather than hidden",
+    ),
+    # --- the README's headline routing table ----------------------------
+    (
+        "policy.json",
+        "routes.0.assigned_model",
+        lambda v: f"→  {v}",
+        "the cheap model the policy actually assigns",
+    ),
+    (
+        "policy.json",
+        "routes.0.ci_low",
+        lambda v: f"CI low {v * 100:.1f}%",
+        "the lower bound that justifies routing cheap",
+    ),
+    (
+        "policy.json",
+        "routes.0.floor",
+        lambda v: f"floor {v * 100:.1f}%",
+        "the quality bar that lower bound must clear",
+    ),
+    (
+        "verdict-claude-haiku-4-5-vs-claude-sonnet-5.json",
+        "n",
+        lambda v: f"fitted on **{v} paired items**",
+        "sample size behind the policy, in the opening table",
     ),
     (
         "loadtest.json",

@@ -2452,3 +2452,40 @@ exact-match verifier correctness: the judge has never been calibrated, so the 30
 have still produced nothing.
 
 ---
+
+## D-077 — The README's first thirty seconds carry the thesis
+
+**Status:** ACCEPTED · **Date:** 2026-10-29 · **Phase:** P8
+
+**Decision.** The README opens with the routing table — three identical requests, three different
+models, each with the measurement behind it — before any prose about architecture. The headline
+figures it quotes are pinned by `tools/verify-readme.py`, which now checks **17** values against
+`artifacts/` rather than 13.
+
+**Why.** The thesis sentence had been there since P0 and the evidence for it was eleven sections
+down. A reader who stops after the first screen is the common case, not the exception, and that
+reader was getting the claim without the proof. The routing table is the shortest honest statement
+of what the project does:
+
+```
+x-verdict-route: math_word_problem  ->  claude-haiku-4-5   half price · CI low 86.3% >= floor 82.3%
+x-verdict-route: multiple_choice    ->  claude-sonnet-5    30 items · insufficient evidence
+(no route header)                   ->  claude-opus-5      unrecognised route gets no discount
+```
+
+Cheap where proven, expensive where not, safest when unknown — in three lines, with the numbers that
+justify each.
+
+**Why a code block rather than a screenshot.** An image of a terminal goes stale silently: the policy
+can change and the picture cannot. These are real header values, and the two that matter — `ci_low`
+and `floor` — are now verified against `policy.json` on every commit. A screenshot would have been
+prettier and unfalsifiable.
+
+**Also pinned.** `dig()` in the verifier learned to index lists, because the policy's first route
+lives at `routes.0` and until now every checked path had been a flat object.
+
+**Consequence.** Verified by planting `CI low 99.9%` and watching CI reject it. The opening is now
+the part of the README that cannot drift from the artifacts, which is the opposite of how README
+openings usually age.
+
+---
