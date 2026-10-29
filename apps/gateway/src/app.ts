@@ -77,6 +77,13 @@ export function buildApp({ env, services }: BuildOptions): GatewayApp {
     const accept = req.headers.accept ?? "";
     if (!accept.includes("text/html")) return index;
 
+    // Build the example from the request's own host rather than a constant.
+    // A hardcoded origin is wrong the moment the service moves, and this page
+    // exists to be copied from (D-078).
+    const proto = (req.headers["x-forwarded-proto"] as string | undefined) ?? "http";
+    const host = req.headers.host ?? "localhost:8080";
+    const self = `${proto.split(",")[0] ?? "http"}://${host}`;
+
     // Deliberately one self-contained page with no external requests: an index
     // that needs a CDN to render can fail in ways the service it describes has
     // not.
@@ -114,7 +121,7 @@ statistical quality floor &mdash; and refuses to route cheap when it cannot prov
   <tr><td>GET /ready</td><td>readiness &mdash; dependencies and circuit-breaker state</td></tr>
 </table>
 <p>Change one line in any OpenAI client &mdash; the base URL &mdash; and it works unchanged:</p>
-<pre>curl -N https://verdictgateway-production.up.railway.app/v1/chat/completions \\
+<pre>curl -N ${self}/v1/chat/completions \\
   -H 'content-type: application/json' \\
   -d '{"model":"openai/gpt-oss-20b","stream":true,
        "messages":[{"role":"user","content":"Say hello"}]}'</pre>

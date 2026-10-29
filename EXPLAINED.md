@@ -2,11 +2,11 @@
 
 Assumes you know nothing about this project. Read top to bottom.
 
-|           |                                                      |
-| --------- | ---------------------------------------------------- |
-| Dashboard | **https://verdict-navy.vercel.app**                  |
-| Gateway   | **https://verdictgateway-production.up.railway.app** |
-| Code      | **https://github.com/iraagarg/verdict**              |
+|           |                                         |
+| --------- | --------------------------------------- |
+| Dashboard | **https://verdict-navy.vercel.app**     |
+| Gateway   | **`make up`** — runs locally on :8080   |
+| Code      | **https://github.com/iraagarg/verdict** |
 
 ---
 
@@ -327,7 +327,7 @@ other means stop. Treating them the same once caused 7 rate limits to reject **3
 ### Try it now
 
 ```bash
-curl -s https://verdictgateway-production.up.railway.app/health
+curl -s localhost:8080/health
 ```
 
 ## 6.2 The Database

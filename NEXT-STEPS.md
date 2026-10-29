@@ -8,17 +8,17 @@ Your personal checklist.
 
 # Where you are right now
 
-|                    |                                                      |
-| ------------------ | ---------------------------------------------------- |
-| Dashboard          | **https://verdict-navy.vercel.app**                  |
-| Gateway            | **https://verdictgateway-production.up.railway.app** |
-| Database           | Neon, migrated automatically from GitHub             |
-| Commits            | 41                                                   |
-| Tests passing      | 669                                                  |
-| Decisions recorded | 68                                                   |
-| CI                 | green                                                |
-| Deploy pipeline    | green                                                |
-| Money spent        | $0.49                                                |
+|                    |                                          |
+| ------------------ | ---------------------------------------- |
+| Dashboard          | **https://verdict-navy.vercel.app**      |
+| Gateway            | **`make up`** — runs locally on :8080    |
+| Database           | Neon, migrated automatically from GitHub |
+| Commits            | 41                                       |
+| Tests passing      | 669                                      |
+| Decisions recorded | 68                                       |
+| CI                 | green                                    |
+| Deploy pipeline    | green                                    |
+| Money spent        | $0.49                                    |
 
 Every push now runs your full test suite, applies database migrations, and confirms your live
 gateway is answering. **If the tests fail, nothing ships.**

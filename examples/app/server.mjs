@@ -27,7 +27,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const GATEWAY = process.env.VERDICT_URL ?? "https://verdictgateway-production.up.railway.app";
+// Defaults to a local gateway: `make up` starts one. A hosted instance ran
+// for a while and is no longer up, and an example pointing at a dead host is
+// worse than one that tells you to start your own (D-078).
+const GATEWAY = process.env.VERDICT_URL ?? "http://localhost:8080";
 const PORT = Number(process.env.PORT ?? 4000);
 
 const page = readFileSync(join(HERE, "index.html"), "utf8");

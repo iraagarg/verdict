@@ -8,6 +8,7 @@ instead of asserted, which is why it sits outside `apps/` and takes no dependenc
 `@verdict/shared`.
 
 ```bash
+make up            # starts the gateway on :8080
 pnpm install
 node examples/chat.mjs "What is an API gateway? One sentence."
 ```
@@ -16,7 +17,7 @@ node examples/chat.mjs "What is an API gateway? One sentence."
 
 ```js
 const client = new OpenAI({
-  baseURL: "https://verdictgateway-production.up.railway.app/v1", // <- this
+  baseURL: "http://localhost:8080/v1", // <- this
   apiKey: "not-used-by-verdict",
 });
 ```

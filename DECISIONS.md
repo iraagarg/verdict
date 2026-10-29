@@ -2489,3 +2489,42 @@ the part of the README that cannot drift from the artifacts, which is the opposi
 openings usually age.
 
 ---
+
+## D-078 — The hosted gateway is gone, and the links go with it
+
+**Status:** ACCEPTED · **Date:** 2026-10-29 · **Phase:** P8
+
+**What happened.** `Deploy / Verify the live gateway` failed in 4 seconds. Not a false alarm:
+
+```
+GET /health -> 404   {"message":"Application not found"}
+x-railway-fallback: true
+```
+
+Railway's edge was answering because **no service was bound to the domain** — the free monthly
+credit had run out after a month of 24/7 uptime. The dashboard (Vercel) and the repo were unaffected.
+
+**The failing check was not the problem.** The README linked that gateway. Anyone clicking it got
+`Application not found` — a broken live link on the front page, which is a worse failure than a red
+mark on the Actions tab and one this project's own documentation warns against.
+
+**Decision.** Every link to the hosted gateway is replaced with the one-command local run. The
+examples default to `http://localhost:8080`. The gateway's own index page builds its example `curl`
+from the request's `Host` header rather than a constant, so it is correct wherever it runs. The
+dashboard stays linked — it is static, free to host, and still shows every measurement.
+
+**What was explicitly rejected.** Deleting the `GATEWAY_URL` variable to turn the check green while
+leaving the dead link in place. That is passing a check by removing the check, with the actual
+failure untouched — the precise shape of the four P8 defects where something reported success and
+served nothing (D-062, D-064, D-065, and the 124ms build). The check was right; the deployment was
+wrong.
+
+**The README now says the hosted instance is gone**, rather than quietly not mentioning it. A
+project that ran in production for a month and then stopped paying for it is an ordinary thing;
+pretending it was never hosted would be the dishonest version.
+
+**Consequence.** `verify` skips itself when `GATEWAY_URL` is unset, so CI goes green once the
+variable is removed — green because there is nothing to verify, not because a failure was silenced.
+Restoring a hosted gateway later means setting the variable again and the check comes back.
+
+---

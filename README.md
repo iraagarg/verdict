@@ -28,12 +28,16 @@ answer: at 60 items the two models looked _identical_ — effect exactly `0.0000
 at 197 the cheaper one is **4.6 points ahead**. The first result had the direction wrong. The system
 reported `INCONCLUSIVE` rather than `EQUIVALENT`, which cost nothing and was true.
 
-**Live:** [dashboard](https://verdict-navy.vercel.app) ·
-[gateway](https://verdictgateway-production.up.railway.app) ·
-[run it in one command](#running-it)
+**Live dashboard:** [verdict-navy.vercel.app](https://verdict-navy.vercel.app) — every figure on
+this page, rendered from the committed artifacts.
+
+**The gateway runs locally, in one command.** It was hosted for a month; that instance is gone, and
+the links are not left pointing at it. A dead link is worse than an honest one.
 
 ```bash
-curl -N https://verdictgateway-production.up.railway.app/v1/chat/completions \
+make up    # postgres, migrations, gateway, dashboard - waits until each is healthy
+
+curl -N localhost:8080/v1/chat/completions \
   -H 'content-type: application/json' \
   -d '{"model":"openai/gpt-oss-20b","stream":true,
        "messages":[{"role":"user","content":"Say hello"}]}'

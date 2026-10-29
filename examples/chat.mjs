@@ -11,7 +11,10 @@
  */
 import OpenAI from "openai";
 
-const GATEWAY = process.env.VERDICT_URL ?? "https://verdictgateway-production.up.railway.app";
+// Defaults to a local gateway: `make up` starts one. A hosted instance ran
+// for a while and is no longer up, and an example pointing at a dead host is
+// worse than one that tells you to start your own (D-078).
+const GATEWAY = process.env.VERDICT_URL ?? "http://localhost:8080";
 
 const client = new OpenAI({
   baseURL: `${GATEWAY}/v1`, // <-- ONE LINE. Without it this calls OpenAI directly.
